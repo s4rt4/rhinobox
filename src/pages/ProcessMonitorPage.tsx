@@ -1,0 +1,163 @@
+import { useMemo, useState } from 'react';
+import { Badge, Button, Card, Group, Loader, ScrollArea, Stack, Table, Text, TextInput, Title } from '@mantine/core';
+import { IconRefresh, IconSearch, IconX } from '@tabler/icons-react';
+import { notifications } from '@mantine/notifications';
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { getProcessMetrics, killProcess } from '../lib/monitorApi';
+import { useUiStore } from '../store/uiStore';
+import type { ProcessMetric } from '../types';
+
+function statusColor(status: ProcessMetric['status']) {
+  if (status === 'running') return 'green';
+  if (status === 'stopped') return 'gray';
+  return 'yellow';
+}
+
+export function ProcessMonitorPage() {
+  const activePage = useUiStore((state) => state.activePage);
+  const queryClient = useQueryClient();
+  const [search, setSearch] = useState('');
+
+  const monitorQuery = useQuery({
+    queryKey: ['process-metrics'],
+    queryFn: getProcessMetrics,
+    enabled: activePage === 'monitor',
+    refetchInterval: 15000,
+    refetchOnWindowFocus: false,
+    staleTime: 10000
+  });
+
+  const killMutation = useMutation({
+    mutationFn: killProcess,
+    onSuccess: (message) => {
+      notifications.show({ color: 'green', title: 'Process killed', message });
+      void queryClient.invalidateQueries({ queryKey: ['process-metrics'] });
+      void queryClient.invalidateQueries({ queryKey: ['services'] });
+    },
+    onError: (error) => {
+      notifications.show({
+        color: 'red',
+        title: 'Kill failed',
+        message: error instanceof Error ? error.message : 'Unknown error'
+      });
+    }
+  });
+
+  const filtered = useMemo(() => {
+    const items = monitorQuery.data ?? [];
+    const term = search.trim().toLowerCase();
+    if (!term) return items;
+    return items.filter((item) => {
+      const haystacks = [item.label, item.path ?? '', item.pid?.toString() ?? '', item.port?.toString() ?? ''];
+      return haystacks.some((value) => value.toLowerCase().includes(term));
+    });
+  }, [monitorQuery.data, search]);
+
+  return (
+    <Card withBorder radius="sm">
+      <Stack gap="sm">
+        <Group justify="space-between" align="flex-end">
+          <div>
+            <Title order={4}>Process Monitor</Title>
+            <Text c="dimmed" size="xs">
+              Semua proses Windows yang sedang jalan, lengkap dengan aksi kill.
+            </Text>
+          </div>
+          <Group gap="xs">
+            <Text size="xs" c="dimmed">
+              {filtered.length}/{monitorQuery.data?.length ?? 0} proses
+            </Text>
+            <Button size="xs" variant="light" leftSection={<IconRefresh size={14} />} onClick={() => void monitorQuery.refetch()} loading={monitorQuery.isFetching}>
+              Refresh
+            </Button>
+          </Group>
+        </Group>
+
+        <TextInput
+          size="xs"
+          placeholder="Cari nama proses, PID, port, atau path"
+          value={search}
+          onChange={(event) => setSearch(event.currentTarget.value)}
+          leftSection={<IconSearch size={14} />}
+        />
+
+        {monitorQuery.isLoading ? (
+          <Group justify="center" py="xl">
+            <Loader />
+          </Group>
+        ) : monitorQuery.isError ? (
+          <Text c="red" size="sm">
+            {monitorQuery.error instanceof Error ? monitorQuery.error.message : 'Failed to load process monitor.'}
+          </Text>
+        ) : filtered.length === 0 ? (
+          <Text c="dimmed" size="sm">
+            Tidak ada proses yang cocok.
+          </Text>
+        ) : (
+          <ScrollArea h="calc(100vh - 250px)" offsetScrollbars scrollbarSize={8}>
+            <Table highlightOnHover withTableBorder withColumnBorders>
+              <Table.Thead>
+                <Table.Tr>
+                  <Table.Th w={180}>Process</Table.Th>
+                  <Table.Th w={90}>PID</Table.Th>
+                  <Table.Th w={80}>Port</Table.Th>
+                  <Table.Th w={90}>Memory</Table.Th>
+                  <Table.Th w={80}>CPU</Table.Th>
+                  <Table.Th miw={260}>Path</Table.Th>
+                  <Table.Th w={90}>Status</Table.Th>
+                  <Table.Th w={90} ta="right">Action</Table.Th>
+                </Table.Tr>
+              </Table.Thead>
+              <Table.Tbody>
+                {filtered.map((metric) => {
+                  const busy = killMutation.isPending && killMutation.variables === (metric.pid ?? undefined);
+                  return (
+                    <Table.Tr key={metric.key}>
+                      <Table.Td>
+                        <Text fw={600} size="sm">
+                          {metric.label}
+                        </Text>
+                      </Table.Td>
+                      <Table.Td>{metric.pid ?? '-'}</Table.Td>
+                      <Table.Td>{metric.port ?? '-'}</Table.Td>
+                      <Table.Td>{typeof metric.memoryMb === 'number' ? `${metric.memoryMb.toFixed(1)} MB` : '-'}</Table.Td>
+                      <Table.Td>{typeof metric.cpuSeconds === 'number' ? `${metric.cpuSeconds.toFixed(1)} s` : '-'}</Table.Td>
+                      <Table.Td>
+                        <Text size="xs" c="dimmed" style={{ whiteSpace: 'pre-wrap', overflowWrap: 'anywhere', wordBreak: 'break-word' }}>
+                          {metric.path ?? '-'}
+                        </Text>
+                      </Table.Td>
+                      <Table.Td>
+                        <Badge color={statusColor(metric.status)} variant="light">
+                          {metric.status}
+                        </Badge>
+                      </Table.Td>
+                      <Table.Td>
+                        <Group justify="flex-end" wrap="nowrap">
+                          <Button
+                            size="compact-xs"
+                            color="red"
+                            variant="subtle"
+                            leftSection={<IconX size={12} />}
+                            disabled={!metric.canKill || metric.pid === null}
+                            loading={busy}
+                            onClick={() => {
+                              if (metric.pid === null) return;
+                              killMutation.mutate(metric.pid);
+                            }}
+                          >
+                            Kill
+                          </Button>
+                        </Group>
+                      </Table.Td>
+                    </Table.Tr>
+                  );
+                })}
+              </Table.Tbody>
+            </Table>
+          </ScrollArea>
+        )}
+      </Stack>
+    </Card>
+  );
+}
