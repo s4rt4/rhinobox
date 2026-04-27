@@ -1,17 +1,11 @@
 import { useMemo, useState } from 'react';
-import { Badge, Button, Card, Group, Loader, ScrollArea, Stack, Table, Text, TextInput, Title } from '@mantine/core';
+import { Button, Card, Group, Loader, ScrollArea, Stack, Table, Text, TextInput, Title } from '@mantine/core';
 import { IconRefresh, IconSearch, IconX } from '@tabler/icons-react';
 import { notifications } from '@mantine/notifications';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { getProcessMetrics, killProcess } from '../lib/monitorApi';
 import { useUiStore } from '../store/uiStore';
 import type { ProcessMetric } from '../types';
-
-function statusColor(status: ProcessMetric['status']) {
-  if (status === 'running') return 'green';
-  if (status === 'stopped') return 'gray';
-  return 'yellow';
-}
 
 export function ProcessMonitorPage() {
   const activePage = useUiStore((state) => state.activePage);
@@ -22,9 +16,10 @@ export function ProcessMonitorPage() {
     queryKey: ['process-metrics'],
     queryFn: getProcessMetrics,
     enabled: activePage === 'monitor',
-    refetchInterval: 15000,
+    refetchInterval: false,
     refetchOnWindowFocus: false,
-    staleTime: 10000
+    staleTime: 30000,
+    placeholderData: (previousData) => previousData
   });
 
   const killMutation = useMutation({
@@ -67,7 +62,7 @@ export function ProcessMonitorPage() {
             <Text size="xs" c="dimmed">
               {filtered.length}/{monitorQuery.data?.length ?? 0} proses
             </Text>
-            <Button size="xs" variant="light" leftSection={<IconRefresh size={14} />} onClick={() => void monitorQuery.refetch()} loading={monitorQuery.isFetching}>
+            <Button size="xs" variant="light" leftSection={<IconRefresh size={14} />} onClick={() => void monitorQuery.refetch()} loading={monitorQuery.isRefetching}>
               Refresh
             </Button>
           </Group>
@@ -81,7 +76,7 @@ export function ProcessMonitorPage() {
           leftSection={<IconSearch size={14} />}
         />
 
-        {monitorQuery.isLoading ? (
+        {monitorQuery.isPending && !monitorQuery.data ? (
           <Group justify="center" py="xl">
             <Loader />
           </Group>
@@ -104,8 +99,7 @@ export function ProcessMonitorPage() {
                   <Table.Th w={90}>Memory</Table.Th>
                   <Table.Th w={80}>CPU</Table.Th>
                   <Table.Th miw={260}>Path</Table.Th>
-                  <Table.Th w={90}>Status</Table.Th>
-                  <Table.Th w={90} ta="right">Action</Table.Th>
+                  <Table.Th w={140} ta="center">Action</Table.Th>
                 </Table.Tr>
               </Table.Thead>
               <Table.Tbody>
@@ -128,16 +122,11 @@ export function ProcessMonitorPage() {
                         </Text>
                       </Table.Td>
                       <Table.Td>
-                        <Badge color={statusColor(metric.status)} variant="light">
-                          {metric.status}
-                        </Badge>
-                      </Table.Td>
-                      <Table.Td>
-                        <Group justify="flex-end" wrap="nowrap">
+                        <Group justify="center" wrap="nowrap">
                           <Button
-                            size="compact-xs"
+                            size="xs"
                             color="red"
-                            variant="subtle"
+                            variant="filled"
                             leftSection={<IconX size={12} />}
                             disabled={!metric.canKill || metric.pid === null}
                             loading={busy}

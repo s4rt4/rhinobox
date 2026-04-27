@@ -1,6 +1,8 @@
 import { ActionIcon, Badge, Group, Text, Title } from '@mantine/core';
 import { IconRefresh } from '@tabler/icons-react';
 
+const logoUrl = new URL('../../../assets/branding/rhinobox.png', import.meta.url).href;
+
 interface AppHeaderProps {
   summaryText: string;
   refreshing: boolean;
@@ -12,7 +14,7 @@ export function AppHeader({ summaryText, refreshing, onRefresh }: AppHeaderProps
     <Group justify="space-between" h="100%" px="sm">
       <Group gap="sm" wrap="nowrap">
         <img
-          src="/assets/branding/rhinobox.svg"
+          src={logoUrl}
           alt="RhinoBOX"
           style={{ width: 28, height: 28, display: 'block' }}
         />

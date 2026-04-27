@@ -26,9 +26,10 @@ export function App() {
   const metricsQuery = useQuery({
     queryKey: ['system-metrics'],
     queryFn: getSystemMetrics,
-    refetchInterval: 5000,
+    refetchInterval: 8000,
     refetchOnWindowFocus: false,
-    staleTime: 3000
+    staleTime: 6000,
+    placeholderData: (previousData) => previousData
   });
   const services = servicesQuery.data ?? [];
   const visibleServices = services.filter((item) => !['localhost', 'phpmyadmin'].includes(item.key));
@@ -81,7 +82,7 @@ export function App() {
         <AppSidebar />
       </AppShell.Navbar>
       <AppShell.Footer>
-        <AppFooter metrics={metricsQuery.data} loading={metricsQuery.isLoading || metricsQuery.isFetching} />
+        <AppFooter metrics={metricsQuery.data} loading={metricsQuery.isPending} />
       </AppShell.Footer>
       <AppShell.Main>
         <Box maw={contentMaxWidth} pb="xl">

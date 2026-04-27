@@ -1,6 +1,6 @@
 import type { ReactNode } from 'react';
 import { Group, Text } from '@mantine/core';
-import { IconActivityHeartbeat, IconArrowDown, IconArrowUp, IconCpu, IconDeviceSdCard, IconServer } from '@tabler/icons-react';
+import { IconArrowDown, IconArrowUp, IconCpu, IconDeviceSdCard, IconServer } from '@tabler/icons-react';
 import type { SystemMetrics } from '../../types';
 
 interface AppFooterProps {
@@ -47,22 +47,18 @@ function Item({
 }
 
 export function AppFooter({ metrics, loading }: AppFooterProps) {
+  const initialLoading = loading && !metrics;
+
   return (
     <Group justify="space-between" h="100%" px="sm" wrap="nowrap">
       <Group gap="md" wrap="nowrap">
-        <Item icon={<IconCpu size={14} />} label="CPU" value={loading ? '...' : formatPercent(metrics?.cpuPercent)} />
-        <Item icon={<IconServer size={14} />} label="RAM" value={loading ? '...' : formatGb(metrics?.memoryUsedGb, metrics?.memoryTotalGb)} />
-        <Item icon={<IconDeviceSdCard size={14} />} label="Disk" value={loading ? '...' : formatGb(metrics?.diskUsedGb, metrics?.diskTotalGb)} />
+        <Item icon={<IconCpu size={14} />} label="CPU" value={initialLoading ? '...' : formatPercent(metrics?.cpuPercent)} />
+        <Item icon={<IconServer size={14} />} label="RAM" value={initialLoading ? '...' : formatGb(metrics?.memoryUsedGb, metrics?.memoryTotalGb)} />
+        <Item icon={<IconDeviceSdCard size={14} />} label="Disk" value={initialLoading ? '...' : formatGb(metrics?.diskUsedGb, metrics?.diskTotalGb)} />
       </Group>
       <Group gap="md" wrap="nowrap">
-        <Item icon={<IconArrowDown size={14} />} label="Down" value={loading ? '...' : formatSpeed(metrics?.downloadKbps)} />
-        <Item icon={<IconArrowUp size={14} />} label="Up" value={loading ? '...' : formatSpeed(metrics?.uploadKbps)} />
-        <Group gap={6} wrap="nowrap">
-          <IconActivityHeartbeat size={14} />
-          <Text size="xs" c="dimmed">
-            Live
-          </Text>
-        </Group>
+        <Item icon={<IconArrowDown size={14} />} label="Down" value={initialLoading ? '...' : formatSpeed(metrics?.downloadKbps)} />
+        <Item icon={<IconArrowUp size={14} />} label="Up" value={initialLoading ? '...' : formatSpeed(metrics?.uploadKbps)} />
       </Group>
     </Group>
   );

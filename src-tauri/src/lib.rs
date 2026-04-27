@@ -496,8 +496,7 @@ fn latest_matching_file(dir: &str, prefix: &str, suffix: &str) -> Option<String>
     latest.map(|(_, path)| path)
 }
 
-#[tauri::command]
-fn get_services() -> Vec<ManagedService> {
+fn get_services_inner() -> Vec<ManagedService> {
     let nginx_versions = service_versions("nginx");
     let php_versions = service_versions("php_cgi");
     let mariadb_versions = service_versions("mariadb");
@@ -891,8 +890,7 @@ fn get_logs() -> Vec<LogTarget> {
         .collect()
 }
 
-#[tauri::command]
-fn get_process_metrics() -> Vec<ProcessMetric> {
+fn get_process_metrics_inner() -> Vec<ProcessMetric> {
     let current_pid = std::process::id();
     let script = format!(
         r#"
@@ -1020,8 +1018,7 @@ fn set_service_version(key: String, version: String) -> Result<String, String> {
     Ok(format!("{key} version set to {version}"))
 }
 
-#[tauri::command]
-fn control_service(key: String, action: String, version: Option<String>) -> Result<String, String> {
+fn control_service_inner(key: String, action: String, version: Option<String>) -> Result<String, String> {
     let chosen_version = version.or_else(|| get_selected_service_version(&key));
 
     match (key.as_str(), action.as_str()) {
@@ -1085,6 +1082,24 @@ fn control_service(key: String, action: String, version: Option<String>) -> Resu
         ("postgresql", "restart") => powershell("Restart-Service -Name 'postgresql-x64-17' -Force; 'PostgreSQL restarted'"),
         _ => Err("Unsupported service action".into()),
     }
+}
+
+#[tauri::command]
+async fn get_services() -> Result<Vec<ManagedService>, String> {
+    tauri::async_runtime::spawn_blocking(get_services_inner)
+        .await
+        .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+async fn control_service(
+    key: String,
+    action: String,
+    version: Option<String>,
+) -> Result<String, String> {
+    tauri::async_runtime::spawn_blocking(move || control_service_inner(key, action, version))
+        .await
+        .map_err(|e| e.to_string())?
 }
 
 #[tauri::command]
@@ -1171,8 +1186,7 @@ fn open_git_bash(path: String) -> Result<String, String> {
     Ok("Opened Git Bash".into())
 }
 
-#[tauri::command]
-fn kill_process(pid: u32) -> Result<String, String> {
+fn kill_process_inner(pid: u32) -> Result<String, String> {
     if pid == 0 || pid == 4 || pid == std::process::id() {
         return Err("Refusing to kill a protected process".into());
     }
@@ -1191,6 +1205,20 @@ fn kill_process(pid: u32) -> Result<String, String> {
     let pid_text = pid.to_string();
     command_output("taskkill", &["/PID", &pid_text, "/F"])?;
     Ok(format!("Process {process_name} ({pid}) terminated"))
+}
+
+#[tauri::command]
+async fn get_process_metrics() -> Result<Vec<ProcessMetric>, String> {
+    tauri::async_runtime::spawn_blocking(get_process_metrics_inner)
+        .await
+        .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+async fn kill_process(pid: u32) -> Result<String, String> {
+    tauri::async_runtime::spawn_blocking(move || kill_process_inner(pid))
+        .await
+        .map_err(|e| e.to_string())?
 }
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
