@@ -61,3 +61,13 @@ export interface ProcessMetric {
   path?: string | null;
   canKill?: boolean;
 }
+
+export interface SystemMetrics {
+  cpuPercent: number | null;
+  memoryUsedGb: number | null;
+  memoryTotalGb: number | null;
+  diskUsedGb: number | null;
+  diskTotalGb: number | null;
+  downloadKbps: number | null;
+  uploadKbps: number | null;
+}

@@ -14,9 +14,9 @@
       {
         "title": "RhinoBOX",
         "width": 1040,
-        "height": 760,
+        "height": 680,
         "minWidth": 920,
-        "minHeight": 680,
+        "minHeight": 560,
         "resizable": true,
         "maximizable": false,
         "center": true

@@ -8,6 +8,8 @@ import { useUiStore } from '../store/uiStore';
 
 export function ConfigEditorPage() {
   const activePage = useUiStore((state) => state.activePage);
+  const pendingConfigKey = useUiStore((state) => state.pendingConfigKey);
+  const clearPendingConfigKey = useUiStore((state) => state.clearPendingConfigKey);
   const queryClient = useQueryClient();
   const filesQuery = useQuery({
     queryKey: ['config-files'],
@@ -29,6 +31,13 @@ export function ConfigEditorPage() {
   const [content, setContent] = useState('');
   const [search, setSearch] = useState('');
   const [reloadOnSave, setReloadOnSave] = useState(true);
+
+  useEffect(() => {
+    if (pendingConfigKey) {
+      setSelectedKey(pendingConfigKey);
+      clearPendingConfigKey();
+    }
+  }, [pendingConfigKey, clearPendingConfigKey]);
 
   useEffect(() => {
     if (!selectedKey && filesQuery.data?.[0]) {
@@ -71,7 +80,15 @@ export function ConfigEditorPage() {
   });
 
   return (
-    <Card withBorder radius="sm">
+    <Card
+      withBorder
+      radius="sm"
+      style={{
+        minHeight: 'calc(100vh - 150px)',
+        display: 'flex',
+        flexDirection: 'column'
+      }}
+    >
       <Stack gap="sm">
         <div>
           <Title order={4}>Config Editor</Title>
@@ -103,11 +120,18 @@ export function ConfigEditorPage() {
               </Group>
             ) : fileQuery.data ? (
               <>
-                <Group justify="space-between" align="flex-start">
-                  <Code style={{ whiteSpace: 'pre-wrap', overflowWrap: 'anywhere', wordBreak: 'break-word', maxWidth: '60%' }}>
+                <Group justify="space-between" align="flex-start" wrap="nowrap">
+                  <Code
+                    style={{
+                      whiteSpace: 'pre-wrap',
+                      overflowWrap: 'anywhere',
+                      wordBreak: 'break-word',
+                      flex: 1
+                    }}
+                  >
                     {fileQuery.data.path}
                   </Code>
-                  <Group gap="xs">
+                  <Group gap="xs" wrap="nowrap" align="center">
                     <Badge variant="outline">{lineCount} lines</Badge>
                     <Badge variant="outline" color={fileQuery.data.exists === false ? 'red' : 'green'}>
                       {fileQuery.data.exists === false ? 'missing' : 'available'}
@@ -138,14 +162,25 @@ export function ConfigEditorPage() {
                   onChange={(event) => setReloadOnSave(event.currentTarget.checked)}
                   label="Reload related service after save"
                 />
-                <ScrollArea h="calc(100vh - 340px)" offsetScrollbars scrollbarSize={8}>
+                <ScrollArea
+                  h="calc(100vh - 370px)"
+                  offsetScrollbars
+                  scrollbarSize={8}
+                  type="auto"
+                >
                   <Textarea
                     autosize={false}
-                    minRows={18}
-                    maxRows={18}
+                    minRows={28}
+                    maxRows={28}
                     value={content}
                     onChange={(event) => setContent(event.currentTarget.value)}
-                    styles={{ input: { fontFamily: 'Consolas, monospace', fontSize: 13 } }}
+                    styles={{
+                      input: {
+                        fontFamily: 'Consolas, monospace',
+                        fontSize: 13,
+                        minHeight: 'calc(100vh - 400px)'
+                      }
+                    }}
                   />
                 </ScrollArea>
                 <Group justify="flex-end">

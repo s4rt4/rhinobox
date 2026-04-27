@@ -1,7 +1,9 @@
-import { Badge, Button, Card, Group, Loader, ScrollArea, Stack, Table, Text, Title } from '@mantine/core';
-import { IconRefresh } from '@tabler/icons-react';
+import { Badge, Button, Card, Group, Loader, Stack, Text, Title } from '@mantine/core';
+import { IconCopy, IconFileCode, IconFolder, IconRefresh } from '@tabler/icons-react';
+import { notifications } from '@mantine/notifications';
 import { useQuery } from '@tanstack/react-query';
 import { getDiscovery } from '../lib/discoveryApi';
+import { openExternal } from '../lib/externalLinks';
 import { useUiStore } from '../store/uiStore';
 import type { DiscoveryItem } from '../types';
 
@@ -16,8 +18,37 @@ function sourceColor(source: DiscoveryItem['source']) {
   }
 }
 
+function isConfigKey(key: string) {
+  return ['php_ini', 'mariadb_conf', 'postgresql_conf', 'postgresql_hba'].includes(key);
+}
+
+function configTargetKey(key: string) {
+  switch (key) {
+    case 'php_ini':
+      return 'php';
+    case 'mariadb_conf':
+      return 'mariadb';
+    case 'postgresql_conf':
+      return 'postgresql';
+    case 'postgresql_hba':
+      return 'postgresql_hba';
+    default:
+      return null;
+  }
+}
+
+function folderTarget(value: string) {
+  const normalized = value.replace(/\//g, '\\');
+  if (/\.([a-z0-9]+)$/i.test(normalized)) {
+    const lastSlash = normalized.lastIndexOf('\\');
+    return lastSlash > 2 ? normalized.slice(0, lastSlash) : normalized;
+  }
+  return normalized;
+}
+
 export function DiscoveryPage() {
   const activePage = useUiStore((state) => state.activePage);
+  const openConfigTarget = useUiStore((state) => state.openConfigTarget);
   const discoveryQuery = useQuery({
     queryKey: ['discovery'],
     queryFn: getDiscovery,
@@ -26,45 +57,57 @@ export function DiscoveryPage() {
     staleTime: 30000
   });
 
+  async function copyPath(value: string) {
+    await navigator.clipboard.writeText(value);
+    notifications.show({
+      color: 'blue',
+      title: 'Path copied',
+      message: value
+    });
+  }
+
   return (
-    <Card withBorder radius="sm">
-      <Stack gap="sm">
-        <Group justify="space-between">
+    <Stack gap="sm">
+      <Card withBorder radius="sm">
+        <Group justify="space-between" align="center">
           <div>
-            <Title order={4}>Discovery</Title>
+            <Title order={4}>Environment Paths</Title>
             <Text c="dimmed" size="xs">
-              Daftar path dan identifier environment yang saat ini sudah dibaca RhinoBOX dari setup lokal kamu.
+              Halaman support/debug untuk melihat jalur aktif yang benar-benar dipakai RhinoBOX.
             </Text>
           </div>
           <Button size="xs" variant="light" leftSection={<IconRefresh size={14} />} onClick={() => void discoveryQuery.refetch()} loading={discoveryQuery.isFetching}>
             Refresh paths
           </Button>
         </Group>
+      </Card>
 
-        {discoveryQuery.isLoading ? (
-          <Group justify="center" py="xl">
-            <Loader />
-          </Group>
-        ) : discoveryQuery.isError ? (
-          <Text c="red" size="sm">
-            {discoveryQuery.error instanceof Error ? discoveryQuery.error.message : 'Failed to load discovery data.'}
-          </Text>
-        ) : (
-          <ScrollArea h="calc(100vh - 210px)" offsetScrollbars scrollbarSize={8}>
-            <Table highlightOnHover withTableBorder withColumnBorders>
-              <Table.Thead>
-                <Table.Tr>
-                  <Table.Th w={180}>Target</Table.Th>
-                  <Table.Th miw={420}>Path / Value</Table.Th>
-                  <Table.Th w={110}>Source</Table.Th>
-                  <Table.Th w={110}>Status</Table.Th>
-                </Table.Tr>
-              </Table.Thead>
-              <Table.Tbody>
-                {(discoveryQuery.data ?? []).map((item) => (
-                  <Table.Tr key={item.key}>
-                    <Table.Td>{item.label}</Table.Td>
-                    <Table.Td>
+      {discoveryQuery.isLoading ? (
+        <Group justify="center" py="xl">
+          <Loader />
+        </Group>
+      ) : discoveryQuery.isError ? (
+        <Text c="red" size="sm">
+          {discoveryQuery.error instanceof Error ? discoveryQuery.error.message : 'Failed to load discovery data.'}
+        </Text>
+      ) : (
+        <Stack gap="sm">
+          {(discoveryQuery.data ?? []).map((item) => {
+            const targetKey = configTargetKey(item.key);
+            return (
+              <Card key={item.key} withBorder radius="sm">
+                <Stack gap="xs">
+                  <Group justify="space-between" align="flex-start" wrap="nowrap">
+                    <div style={{ flex: 1 }}>
+                      <Group gap="xs" mb={6}>
+                        <Text fw={700}>{item.label}</Text>
+                        <Badge variant="light" color={sourceColor(item.source)}>
+                          {item.source}
+                        </Badge>
+                        <Badge variant="light" color={item.available === false ? 'red' : 'green'}>
+                          {item.available === false ? 'missing' : 'available'}
+                        </Badge>
+                      </Group>
                       <Text
                         size="sm"
                         ff="monospace"
@@ -76,24 +119,42 @@ export function DiscoveryPage() {
                       >
                         {item.value}
                       </Text>
-                    </Table.Td>
-                    <Table.Td>
-                      <Badge variant="light" color={sourceColor(item.source)}>
-                        {item.source}
-                      </Badge>
-                    </Table.Td>
-                    <Table.Td>
-                      <Badge variant="light" color={item.available === false ? 'red' : 'green'}>
-                        {item.available === false ? 'missing' : 'available'}
-                      </Badge>
-                    </Table.Td>
-                  </Table.Tr>
-                ))}
-              </Table.Tbody>
-            </Table>
-          </ScrollArea>
-        )}
-      </Stack>
-    </Card>
+                    </div>
+                    <Group gap="xs" wrap="nowrap" align="center">
+                      <Button
+                        size="xs"
+                        variant="light"
+                        leftSection={<IconFolder size={14} />}
+                        onClick={() => void openExternal(folderTarget(item.value))}
+                      >
+                        Open folder
+                      </Button>
+                      <Button
+                        size="xs"
+                        variant="light"
+                        leftSection={<IconCopy size={14} />}
+                        onClick={() => void copyPath(item.value)}
+                      >
+                        Copy path
+                      </Button>
+                      {isConfigKey(item.key) && targetKey ? (
+                        <Button
+                          size="xs"
+                          variant="light"
+                          leftSection={<IconFileCode size={14} />}
+                          onClick={() => openConfigTarget(targetKey)}
+                        >
+                          Open config
+                        </Button>
+                      ) : null}
+                    </Group>
+                  </Group>
+                </Stack>
+              </Card>
+            );
+          })}
+        </Stack>
+      )}
+    </Stack>
   );
 }

@@ -17,6 +17,30 @@ $configFiles = [
         'path' => 'C:\\Users\\Admin\\AppData\\Local\\Microsoft\\WinGet\\Packages\\PHP.PHP.8.4_Microsoft.Winget.Source_8wekyb3d8bbwe\\php.ini',
         'serviceKey' => 'php_cgi',
     ],
+    'mariadb' => [
+        'key' => 'mariadb',
+        'label' => 'my.ini',
+        'path' => 'C:\\Program Files\\MariaDB 12.2\\data\\my.ini',
+        'serviceKey' => 'mariadb',
+    ],
+    'phpmyadmin' => [
+        'key' => 'phpmyadmin',
+        'label' => 'config.inc.php',
+        'path' => 'C:\\www\\phpmyadmin\\config.inc.php',
+        'serviceKey' => null,
+    ],
+    'postgresql' => [
+        'key' => 'postgresql',
+        'label' => 'postgresql.conf',
+        'path' => 'C:\\Program Files\\PostgreSQL\\17\\data\\postgresql.conf',
+        'serviceKey' => 'postgresql',
+    ],
+    'postgresql_hba' => [
+        'key' => 'postgresql_hba',
+        'label' => 'pg_hba.conf',
+        'path' => 'C:\\Program Files\\PostgreSQL\\17\\data\\pg_hba.conf',
+        'serviceKey' => 'postgresql',
+    ],
 ];
 
 $configFiles = array_map(static function (array $item): array {
@@ -71,6 +95,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $reloadCommands = [
             'nginx' => "& 'C:\\Users\\Admin\\Documents\\Codex\\2026-04-23-halo\\start-local-web.ps1'; 'nginx reloaded'",
             'php_cgi' => "Get-Process php-cgi -ErrorAction SilentlyContinue | Stop-Process -Force; Start-Sleep -Milliseconds 500; & 'C:\\Users\\Admin\\Documents\\Codex\\2026-04-23-halo\\start-local-web.ps1'; 'php-cgi restarted'",
+            'mariadb' => "Restart-Service -Name 'MariaDB' -Force; 'MariaDB restarted'",
+            'postgresql' => "Restart-Service -Name 'postgresql-x64-17' -Force; 'PostgreSQL restarted'",
         ];
 
         if (isset($reloadCommands[$serviceKey])) {

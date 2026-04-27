@@ -27,6 +27,9 @@ $commands = [
     'mariadb:start' => "Start-Service -Name 'MariaDB'; 'MariaDB started'",
     'mariadb:stop' => "Stop-Service -Name 'MariaDB' -Force; 'MariaDB stopped'",
     'mariadb:restart' => "Restart-Service -Name 'MariaDB' -Force; 'MariaDB restarted'",
+    'postgresql:start' => "Start-Service -Name 'postgresql-x64-17'; 'PostgreSQL started'",
+    'postgresql:stop' => "Stop-Service -Name 'postgresql-x64-17' -Force; 'PostgreSQL stopped'",
+    'postgresql:restart' => "Restart-Service -Name 'postgresql-x64-17' -Force; 'PostgreSQL restarted'",
 ];
 
 $commandKey = "{$key}:{$action}";

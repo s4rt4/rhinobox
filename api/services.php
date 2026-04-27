@@ -57,6 +57,7 @@ function listening_ports(): array
 $ports = listening_ports();
 $nginxPid = tasklist_pid('nginx.exe');
 $phpCgiPid = tasklist_pid('php-cgi.exe');
+$postgresPid = tasklist_pid('postgres.exe');
 
 $services = [
     [
@@ -88,6 +89,20 @@ $services = [
         'pid' => null,
         'canReload' => false,
         'kind' => 'windows-service',
+        'currentVersion' => '12.2.2',
+        'versions' => ['12.2.2'],
+    ],
+    [
+        'key' => 'postgresql',
+        'label' => 'PostgreSQL',
+        'status' => service_state('postgresql-x64-17'),
+        'detail' => 'Primary PostgreSQL database service',
+        'port' => in_array(5432, $ports, true) ? 5432 : null,
+        'pid' => $postgresPid,
+        'canReload' => false,
+        'kind' => 'windows-service',
+        'currentVersion' => '17.9',
+        'versions' => ['17.9'],
     ],
 ];
 

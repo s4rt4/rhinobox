@@ -1,5 +1,7 @@
 use serde::{Deserialize, Serialize};
-use std::{fs, path::Path, process::Command};
+use once_cell::sync::Lazy;
+use std::{fs, path::Path, process::Command, sync::Mutex, time::Instant};
+use sysinfo::{Disks, Networks, System};
 use tauri::Manager;
 
 const SERVICE_SELECTION_FILE: &str = "C:\\www\\rhinobox\\service-selection.json";
@@ -32,6 +34,8 @@ struct ServiceSelectionState {
     nginx: Option<String>,
     php_cgi: Option<String>,
     mariadb: Option<String>,
+    postgresql: Option<String>,
+    nodejs: Option<String>,
 }
 
 #[derive(Serialize)]
@@ -82,6 +86,26 @@ struct ProcessMetric {
     path: Option<String>,
     can_kill: bool,
 }
+
+#[derive(Serialize, Deserialize, Default)]
+struct SystemMetrics {
+    cpu_percent: Option<f64>,
+    memory_used_gb: Option<f64>,
+    memory_total_gb: Option<f64>,
+    disk_used_gb: Option<f64>,
+    disk_total_gb: Option<f64>,
+    download_kbps: Option<f64>,
+    upload_kbps: Option<f64>,
+}
+
+#[derive(Clone, Copy)]
+struct NetworkSnapshot {
+    timestamp: Instant,
+    received_bytes: u64,
+    transmitted_bytes: u64,
+}
+
+static NETWORK_SNAPSHOT: Lazy<Mutex<Option<NetworkSnapshot>>> = Lazy::new(|| Mutex::new(None));
 
 fn powershell(script: &str) -> Result<String, String> {
     let output = Command::new("powershell")
@@ -221,6 +245,34 @@ fn config_files() -> Vec<ConfigFileSummary> {
             service_key: Some("php_cgi".into()),
             exists: Some(Path::new("C:\\Users\\Admin\\AppData\\Local\\Microsoft\\WinGet\\Packages\\PHP.PHP.8.4_Microsoft.Winget.Source_8wekyb3d8bbwe\\php.ini").exists()),
         },
+        ConfigFileSummary {
+            key: "mariadb".into(),
+            label: "my.ini".into(),
+            path: "C:\\Program Files\\MariaDB 12.2\\data\\my.ini".into(),
+            service_key: Some("mariadb".into()),
+            exists: Some(Path::new("C:\\Program Files\\MariaDB 12.2\\data\\my.ini").exists()),
+        },
+        ConfigFileSummary {
+            key: "phpmyadmin".into(),
+            label: "config.inc.php".into(),
+            path: "C:\\www\\phpmyadmin\\config.inc.php".into(),
+            service_key: None,
+            exists: Some(Path::new("C:\\www\\phpmyadmin\\config.inc.php").exists()),
+        },
+        ConfigFileSummary {
+            key: "postgresql".into(),
+            label: "postgresql.conf".into(),
+            path: "C:\\Program Files\\PostgreSQL\\17\\data\\postgresql.conf".into(),
+            service_key: Some("postgresql".into()),
+            exists: Some(Path::new("C:\\Program Files\\PostgreSQL\\17\\data\\postgresql.conf").exists()),
+        },
+        ConfigFileSummary {
+            key: "postgresql_hba".into(),
+            label: "pg_hba.conf".into(),
+            path: "C:\\Program Files\\PostgreSQL\\17\\data\\pg_hba.conf".into(),
+            service_key: Some("postgresql".into()),
+            exists: Some(Path::new("C:\\Program Files\\PostgreSQL\\17\\data\\pg_hba.conf").exists()),
+        },
     ]
 }
 
@@ -242,6 +294,8 @@ fn get_selected_service_version(key: &str) -> Option<String> {
         "nginx" => state.nginx,
         "php_cgi" => state.php_cgi,
         "mariadb" => state.mariadb,
+        "postgresql" => state.postgresql,
+        "nodejs" => state.nodejs,
         _ => None,
     }
 }
@@ -252,9 +306,71 @@ fn set_selected_service_version(key: &str, version: &str) -> Result<(), String> 
         "nginx" => state.nginx = Some(version.to_string()),
         "php_cgi" => state.php_cgi = Some(version.to_string()),
         "mariadb" => state.mariadb = Some(version.to_string()),
+        "postgresql" => state.postgresql = Some(version.to_string()),
+        "nodejs" => state.nodejs = Some(version.to_string()),
         _ => return Err("Unknown service key".into()),
     }
     write_service_selection_state(&state)
+}
+
+fn node_version_candidates() -> Vec<String> {
+    let mut candidates = Vec::new();
+    let primary = "C:\\Program Files\\nodejs\\node.exe";
+    if Path::new(primary).exists() {
+        candidates.push(primary.to_string());
+    }
+
+    let nvm_root = std::env::var("NVM_HOME")
+        .ok()
+        .filter(|value| !value.trim().is_empty())
+        .or_else(|| {
+            std::env::var("LOCALAPPDATA")
+                .ok()
+                .map(|local| format!("{local}\\nvm"))
+        })
+        .unwrap_or_else(|| "C:\\Program Files\\nvm".to_string());
+
+    if let Ok(entries) = fs::read_dir(&nvm_root) {
+        for entry in entries.flatten() {
+            let path = entry.path();
+            if !path.is_dir() {
+                continue;
+            }
+            let Some(name) = path.file_name().and_then(|value| value.to_str()) else {
+                continue;
+            };
+            if !(name.starts_with('v') || name.chars().next().is_some_and(|ch| ch.is_ascii_digit())) {
+                continue;
+            }
+            let exe = path.join("node.exe");
+            if exe.exists() {
+                candidates.push(exe.to_string_lossy().to_string());
+            }
+        }
+    }
+
+    candidates.sort();
+    candidates.dedup();
+    candidates
+}
+
+fn node_versions_with_paths() -> Vec<(String, String)> {
+    let mut versions: Vec<(String, String)> = node_version_candidates()
+        .into_iter()
+        .filter_map(|path| {
+            command_version(&path, &["-v"]).map(|version| (version.trim_start_matches('v').to_string(), path))
+        })
+        .collect();
+    versions.sort_by(|a, b| a.0.cmp(&b.0));
+    versions.dedup_by(|a, b| a.0 == b.0);
+    versions
+}
+
+fn node_path_for_version(version: &str) -> Option<String> {
+    node_versions_with_paths()
+        .into_iter()
+        .find(|(found_version, _)| found_version == version)
+        .map(|(_, path)| path)
 }
 
 fn nginx_version_path(version: &str) -> Option<String> {
@@ -272,6 +388,19 @@ fn php_version_path(version: &str) -> Option<String> {
         "8.4.20" => Some("C:\\Users\\Admin\\AppData\\Local\\Microsoft\\WinGet\\Packages\\PHP.PHP.8.4_Microsoft.Winget.Source_8wekyb3d8bbwe".into()),
         "8.5.5" => Some("C:\\www\\runtimes\\php\\8.5.5".into()),
         _ => None,
+    }
+}
+
+fn postgresql_service_name() -> String {
+    "postgresql-x64-17".into()
+}
+
+fn postgresql_bin_path() -> Option<String> {
+    let path = "C:\\Program Files\\PostgreSQL\\17\\bin\\psql.exe".to_string();
+    if Path::new(&path).exists() {
+        Some(path)
+    } else {
+        command_exists_path("psql")
     }
 }
 
@@ -304,6 +433,20 @@ fn service_versions(key: &str) -> Vec<String> {
         "nginx" => installed_nginx_versions(),
         "php_cgi" => installed_php_versions(),
         "mariadb" => vec!["12.2.2".into()],
+        "postgresql" => postgresql_bin_path()
+            .and_then(|path| command_version(&path, &["--version"]))
+            .map(|version| {
+                version
+                    .replace("psql (PostgreSQL)", "")
+                    .trim()
+                    .to_string()
+            })
+            .into_iter()
+            .collect(),
+        "nodejs" => node_versions_with_paths()
+            .into_iter()
+            .map(|(version, _)| version)
+            .collect(),
         _ => Vec::new(),
     }
 }
@@ -321,11 +464,45 @@ fn tail_lines(path: &str, max_lines: usize) -> Vec<String> {
     }
 }
 
+fn latest_matching_file(dir: &str, prefix: &str, suffix: &str) -> Option<String> {
+    let mut latest: Option<(std::time::SystemTime, String)> = None;
+    let entries = fs::read_dir(dir).ok()?;
+
+    for entry in entries.flatten() {
+        let path = entry.path();
+        if !path.is_file() {
+            continue;
+        }
+
+        let Some(name) = path.file_name().and_then(|value| value.to_str()) else {
+            continue;
+        };
+        if !name.starts_with(prefix) || !name.ends_with(suffix) {
+            continue;
+        }
+
+        let modified = entry
+            .metadata()
+            .and_then(|metadata| metadata.modified())
+            .unwrap_or(std::time::SystemTime::UNIX_EPOCH);
+
+        let full_path = path.to_string_lossy().to_string();
+        match &latest {
+            Some((current_modified, _)) if *current_modified >= modified => {}
+            _ => latest = Some((modified, full_path)),
+        }
+    }
+
+    latest.map(|(_, path)| path)
+}
+
 #[tauri::command]
 fn get_services() -> Vec<ManagedService> {
     let nginx_versions = service_versions("nginx");
     let php_versions = service_versions("php_cgi");
     let mariadb_versions = service_versions("mariadb");
+    let postgresql_versions = service_versions("postgresql");
+    let node_versions = service_versions("nodejs");
     let nginx_current = get_selected_service_version("nginx")
         .or_else(|| nginx_versions.first().cloned());
     let php_current = get_selected_service_version("php_cgi")
@@ -333,10 +510,34 @@ fn get_services() -> Vec<ManagedService> {
         .or_else(|| php_versions.first().cloned());
     let mariadb_current = get_selected_service_version("mariadb")
         .or_else(|| mariadb_versions.first().cloned());
-    let node_path = command_exists_path("C:\\Program Files\\nodejs\\node.exe")
-        .or_else(|| command_exists_path("node"));
+    let postgresql_current = get_selected_service_version("postgresql")
+        .or_else(|| postgresql_versions.first().cloned());
+    let node_current = get_selected_service_version("nodejs")
+        .or_else(|| node_versions.first().cloned());
+    let node_path = node_current
+        .as_deref()
+        .and_then(node_path_for_version)
+        .or_else(|| {
+            let primary = "C:\\Program Files\\nodejs\\node.exe".to_string();
+            if Path::new(&primary).exists() {
+                Some(primary)
+            } else {
+                command_exists_path("node")
+            }
+        });
     let python_path = command_exists_path("python");
     let go_path = command_exists_path("go");
+    let postgresql_service = postgresql_service_name();
+    let postgresql_path = postgresql_bin_path();
+    let git_path = command_exists_path("git")
+        .or_else(|| {
+            let primary = "C:\\Program Files\\Git\\cmd\\git.exe".to_string();
+            if Path::new(&primary).exists() {
+                Some(primary)
+            } else {
+                None
+            }
+        });
     let localhost_ready = port_is_listening(80);
     let phpmyadmin_ready = localhost_ready && port_is_listening(9000);
 
@@ -381,6 +582,19 @@ fn get_services() -> Vec<ManagedService> {
             launch_target: None,
         },
         ManagedService {
+            key: "postgresql".into(),
+            label: "PostgreSQL".into(),
+            status: windows_service_status(&postgresql_service),
+            detail: "Primary PostgreSQL database service".into(),
+            port: if port_is_listening(5432) { Some(5432) } else { None },
+            pid: process_id_by_name("postgres"),
+            can_reload: false,
+            kind: "windows-service".into(),
+            current_version: postgresql_current,
+            versions: postgresql_versions,
+            launch_target: postgresql_path,
+        },
+        ManagedService {
             key: "localhost".into(),
             label: "Localhost".into(),
             status: if localhost_ready { ServiceStatus::Running } else { ServiceStatus::Stopped },
@@ -415,9 +629,8 @@ fn get_services() -> Vec<ManagedService> {
             pid: process_id_by_name("node"),
             can_reload: false,
             kind: "runtime".into(),
-            current_version: command_version("C:\\Program Files\\nodejs\\node.exe", &["-v"])
-                .or_else(|| command_version("node", &["-v"])),
-            versions: Vec::new(),
+            current_version: node_current,
+            versions: node_versions,
             launch_target: node_path,
         },
         ManagedService {
@@ -446,11 +659,41 @@ fn get_services() -> Vec<ManagedService> {
             versions: Vec::new(),
             launch_target: go_path,
         },
+        ManagedService {
+            key: "git".into(),
+            label: "Git".into(),
+            status: installed_status(git_path.as_ref()),
+            detail: "Version control tooling".into(),
+            port: None,
+            pid: process_id_by_name("git"),
+            can_reload: false,
+            kind: "runtime".into(),
+            current_version: command_version("git", &["--version"])
+                .or_else(|| command_version("C:\\Program Files\\Git\\cmd\\git.exe", &["--version"])),
+            versions: Vec::new(),
+            launch_target: git_path,
+        },
     ]
 }
 
 #[tauri::command]
 fn get_discovery() -> Vec<DiscoveryItem> {
+    let nginx_current = get_selected_service_version("nginx").unwrap_or_else(|| "1.29.8".into());
+    let php_current = get_selected_service_version("php_cgi").unwrap_or_else(|| "8.4.20".into());
+    let node_current = get_selected_service_version("nodejs")
+        .or_else(|| service_versions("nodejs").first().cloned());
+    let nginx_root = nginx_version_path(&nginx_current).unwrap_or_else(|| {
+        "C:\\Users\\Admin\\AppData\\Local\\Microsoft\\WinGet\\Packages\\nginxinc.nginx_Microsoft.Winget.Source_8wekyb3d8bbwe\\nginx-1.29.8".into()
+    });
+    let php_root = php_version_path(&php_current).unwrap_or_else(|| {
+        "C:\\Users\\Admin\\AppData\\Local\\Microsoft\\WinGet\\Packages\\PHP.PHP.8.4_Microsoft.Winget.Source_8wekyb3d8bbwe".into()
+    });
+    let node_path = node_current
+        .as_deref()
+        .and_then(node_path_for_version)
+        .or_else(|| command_exists_path("node"))
+        .unwrap_or_else(|| "C:\\Program Files\\nodejs\\node.exe".into());
+
     vec![
         DiscoveryItem {
             key: "workspace".into(),
@@ -467,32 +710,60 @@ fn get_discovery() -> Vec<DiscoveryItem> {
             available: Some(Path::new("C:\\www").exists()),
         },
         DiscoveryItem {
-            key: "nginx_conf".into(),
-            label: "nginx.conf".into(),
-            value: "C:\\Users\\Admin\\AppData\\Local\\Microsoft\\WinGet\\Packages\\nginxinc.nginx_Microsoft.Winget.Source_8wekyb3d8bbwe\\nginx-1.29.8\\conf\\nginx.conf".into(),
+            key: "nginx_bin".into(),
+            label: "Active nginx binary".into(),
+            value: format!("{nginx_root}\\nginx.exe"),
             source: "detected".into(),
-            available: Some(Path::new("C:\\Users\\Admin\\AppData\\Local\\Microsoft\\WinGet\\Packages\\nginxinc.nginx_Microsoft.Winget.Source_8wekyb3d8bbwe\\nginx-1.29.8\\conf\\nginx.conf").exists()),
+            available: Some(Path::new(&format!("{nginx_root}\\nginx.exe")).exists()),
         },
         DiscoveryItem {
             key: "php_ini".into(),
-            label: "php.ini".into(),
-            value: "C:\\Users\\Admin\\AppData\\Local\\Microsoft\\WinGet\\Packages\\PHP.PHP.8.4_Microsoft.Winget.Source_8wekyb3d8bbwe\\php.ini".into(),
+            label: "Active PHP config".into(),
+            value: format!("{php_root}\\php.ini"),
             source: "detected".into(),
-            available: Some(Path::new("C:\\Users\\Admin\\AppData\\Local\\Microsoft\\WinGet\\Packages\\PHP.PHP.8.4_Microsoft.Winget.Source_8wekyb3d8bbwe\\php.ini").exists()),
+            available: Some(Path::new(&format!("{php_root}\\php.ini")).exists()),
         },
         DiscoveryItem {
-            key: "phpmyadmin".into(),
-            label: "phpMyAdmin".into(),
-            value: "C:\\www\\phpmyadmin".into(),
+            key: "mariadb_conf".into(),
+            label: "MariaDB config".into(),
+            value: "C:\\Program Files\\MariaDB 12.2\\data\\my.ini".into(),
             source: "detected".into(),
-            available: Some(Path::new("C:\\www\\phpmyadmin").exists()),
+            available: Some(Path::new("C:\\Program Files\\MariaDB 12.2\\data\\my.ini").exists()),
         },
         DiscoveryItem {
-            key: "mariadb_service".into(),
-            label: "MariaDB service".into(),
-            value: "MariaDB".into(),
+            key: "mariadb_data".into(),
+            label: "MariaDB data dir".into(),
+            value: "C:\\Program Files\\MariaDB 12.2\\data".into(),
             source: "detected".into(),
-            available: Some(true),
+            available: Some(Path::new("C:\\Program Files\\MariaDB 12.2\\data").exists()),
+        },
+        DiscoveryItem {
+            key: "postgresql_conf".into(),
+            label: "PostgreSQL config".into(),
+            value: "C:\\Program Files\\PostgreSQL\\17\\data\\postgresql.conf".into(),
+            source: "detected".into(),
+            available: Some(Path::new("C:\\Program Files\\PostgreSQL\\17\\data\\postgresql.conf").exists()),
+        },
+        DiscoveryItem {
+            key: "postgresql_hba".into(),
+            label: "PostgreSQL access rules".into(),
+            value: "C:\\Program Files\\PostgreSQL\\17\\data\\pg_hba.conf".into(),
+            source: "detected".into(),
+            available: Some(Path::new("C:\\Program Files\\PostgreSQL\\17\\data\\pg_hba.conf").exists()),
+        },
+        DiscoveryItem {
+            key: "postgresql_data".into(),
+            label: "PostgreSQL data dir".into(),
+            value: "C:\\Program Files\\PostgreSQL\\17\\data".into(),
+            source: "detected".into(),
+            available: Some(Path::new("C:\\Program Files\\PostgreSQL\\17\\data").exists()),
+        },
+        DiscoveryItem {
+            key: "nodejs_path".into(),
+            label: "Active Node.js path".into(),
+            value: node_path.clone(),
+            source: "detected".into(),
+            available: Some(Path::new(&node_path).exists()),
         },
     ]
 }
@@ -545,6 +816,12 @@ fn save_config_file(
             Some("php_cgi") => {
                 let _ = powershell("Get-Process php-cgi -ErrorAction SilentlyContinue | Stop-Process -Force; Start-Sleep -Milliseconds 500; & 'C:\\Users\\Admin\\Documents\\Codex\\2026-04-23-halo\\start-local-web.ps1'; 'php-cgi restarted'");
             }
+            Some("mariadb") => {
+                let _ = powershell("Restart-Service -Name 'MariaDB' -Force; 'MariaDB restarted'");
+            }
+            Some("postgresql") => {
+                let _ = powershell("Restart-Service -Name 'postgresql-x64-17' -Force; 'PostgreSQL restarted'");
+            }
             _ => {}
         }
     }
@@ -577,24 +854,39 @@ fn is_protected_process_name(name: &str) -> bool {
 
 #[tauri::command]
 fn get_logs() -> Vec<LogTarget> {
+    let postgres_log = latest_matching_file(
+        "C:\\Program Files\\PostgreSQL\\17\\data\\log",
+        "postgresql-",
+        ".log",
+    )
+    .unwrap_or_else(|| "C:\\Program Files\\PostgreSQL\\17\\data\\log".into());
+
     let targets = vec![
         (
-            "nginx_error",
-            "nginx error.log",
-            "C:\\Users\\Admin\\AppData\\Local\\Microsoft\\WinGet\\Packages\\nginxinc.nginx_Microsoft.Winget.Source_8wekyb3d8bbwe\\nginx-1.29.8\\logs\\error.log",
+            "nginx_error".to_string(),
+            "nginx error.log".to_string(),
+            "C:\\Users\\Admin\\AppData\\Local\\Microsoft\\WinGet\\Packages\\nginxinc.nginx_Microsoft.Winget.Source_8wekyb3d8bbwe\\nginx-1.29.8\\logs\\error.log".to_string(),
         ),
-        ("vite_dev", "RhinoBOX vite-dev.log", "C:\\www\\rhinobox\\vite-dev.log"),
-        ("phpmyadmin_config", "phpMyAdmin config.inc.php", "C:\\www\\phpmyadmin\\config.inc.php"),
+        (
+            "mariadb_error".to_string(),
+            "MariaDB error log".to_string(),
+            "C:\\Program Files\\MariaDB 12.2\\data\\DESKTOP-SAN5L98.err".to_string(),
+        ),
+        (
+            "postgresql_log".to_string(),
+            "PostgreSQL log".to_string(),
+            postgres_log,
+        ),
     ];
 
     targets
         .into_iter()
         .map(|(key, label, path)| LogTarget {
-            key: key.into(),
-            label: label.into(),
-            path: path.into(),
-            available: Path::new(path).exists(),
-            lines: tail_lines(path, 80),
+            key,
+            label,
+            available: Path::new(&path).exists(),
+            lines: tail_lines(&path, 120),
+            path,
         })
         .collect()
 }
@@ -644,6 +936,78 @@ $items | ConvertTo-Json -Depth 4
         }
     }
     items
+}
+
+#[tauri::command]
+fn get_system_metrics() -> SystemMetrics {
+    let mut system = System::new_all();
+    system.refresh_cpu_usage();
+    system.refresh_memory();
+
+    let cpu_percent = Some(system.global_cpu_usage().round() as f64);
+    let memory_total_gb = Some(((system.total_memory() as f64) / 1024.0 / 1024.0 / 1024.0 * 10.0).round() / 10.0);
+    let memory_used_gb = Some(((system.used_memory() as f64) / 1024.0 / 1024.0 / 1024.0 * 10.0).round() / 10.0);
+
+    let disks = Disks::new_with_refreshed_list();
+    let system_disk = disks
+        .list()
+        .iter()
+        .find(|disk| disk.mount_point().to_string_lossy().eq_ignore_ascii_case("C:\\"))
+        .or_else(|| disks.list().first());
+
+    let (disk_used_gb, disk_total_gb) = if let Some(disk) = system_disk {
+        let total = disk.total_space() as f64;
+        let available = disk.available_space() as f64;
+        let used = total - available;
+        (
+            Some(((used / 1_073_741_824.0) * 10.0).round() / 10.0),
+            Some(((total / 1_073_741_824.0) * 10.0).round() / 10.0),
+        )
+    } else {
+        (None, None)
+    };
+
+    let mut networks = Networks::new_with_refreshed_list();
+    networks.refresh(true);
+    let received_bytes: u64 = networks.values().map(|data| data.total_received()).sum();
+    let transmitted_bytes: u64 = networks.values().map(|data| data.total_transmitted()).sum();
+    let now = Instant::now();
+
+    let (download_kbps, upload_kbps) = if let Ok(mut snapshot) = NETWORK_SNAPSHOT.lock() {
+        let current = NetworkSnapshot {
+            timestamp: now,
+            received_bytes,
+            transmitted_bytes,
+        };
+
+        let speeds = if let Some(previous) = *snapshot {
+            let elapsed = now.duration_since(previous.timestamp).as_secs_f64();
+            if elapsed > 0.0 {
+                let down = ((received_bytes.saturating_sub(previous.received_bytes) as f64) / 1024.0) / elapsed;
+                let up = ((transmitted_bytes.saturating_sub(previous.transmitted_bytes) as f64) / 1024.0) / elapsed;
+                (Some((down * 10.0).round() / 10.0), Some((up * 10.0).round() / 10.0))
+            } else {
+                (None, None)
+            }
+        } else {
+            (None, None)
+        };
+
+        *snapshot = Some(current);
+        speeds
+    } else {
+        (None, None)
+    };
+
+    SystemMetrics {
+        cpu_percent,
+        memory_used_gb,
+        memory_total_gb,
+        disk_used_gb,
+        disk_total_gb,
+        download_kbps,
+        upload_kbps,
+    }
 }
 
 #[tauri::command]
@@ -716,6 +1080,9 @@ fn control_service(key: String, action: String, version: Option<String>) -> Resu
         ("mariadb", "start") => powershell("Start-Service -Name 'MariaDB'; 'MariaDB started'"),
         ("mariadb", "stop") => powershell("Stop-Service -Name 'MariaDB' -Force; 'MariaDB stopped'"),
         ("mariadb", "restart") => powershell("Restart-Service -Name 'MariaDB' -Force; 'MariaDB restarted'"),
+        ("postgresql", "start") => powershell("Start-Service -Name 'postgresql-x64-17'; 'PostgreSQL started'"),
+        ("postgresql", "stop") => powershell("Stop-Service -Name 'postgresql-x64-17' -Force; 'PostgreSQL stopped'"),
+        ("postgresql", "restart") => powershell("Restart-Service -Name 'postgresql-x64-17' -Force; 'PostgreSQL restarted'"),
         _ => Err("Unsupported service action".into()),
     }
 }
@@ -728,6 +1095,80 @@ fn open_external(url: String) -> Result<String, String> {
         .map_err(|e| e.to_string())?;
 
     Ok("Opened external link".into())
+}
+
+#[tauri::command]
+fn open_in_terminal(path: String) -> Result<String, String> {
+    let target = {
+        let candidate = Path::new(&path);
+        if candidate.is_dir() {
+            path.clone()
+        } else {
+            candidate
+                .parent()
+                .map(|parent| parent.to_string_lossy().to_string())
+                .unwrap_or(path.clone())
+        }
+    };
+
+    let wt_available = command_output("where", &["wt"]).is_ok();
+
+    if wt_available {
+        Command::new("cmd")
+            .args(["/C", "start", "", "wt", "-d", &target])
+            .spawn()
+            .map_err(|e| e.to_string())?;
+    } else {
+        let safe_target = target.replace("'", "''");
+        Command::new("powershell")
+            .args([
+                "-NoExit",
+                "-Command",
+                &format!("Set-Location -LiteralPath '{}'", safe_target),
+            ])
+            .spawn()
+            .map_err(|e| e.to_string())?;
+    }
+
+    Ok("Opened terminal".into())
+}
+
+#[tauri::command]
+fn open_git_bash(path: String) -> Result<String, String> {
+    let target = {
+        let candidate = Path::new(&path);
+        if candidate.is_dir() {
+            path.clone()
+        } else {
+            candidate
+                .parent()
+                .map(|parent| parent.to_string_lossy().to_string())
+                .unwrap_or(path.clone())
+        }
+    };
+
+    let git_bash = [
+        "C:\\Program Files\\Git\\git-bash.exe",
+        "C:\\Program Files\\Git\\bin\\bash.exe",
+    ]
+    .into_iter()
+    .find(|candidate| Path::new(candidate).exists())
+    .ok_or_else(|| "Git Bash not found".to_string())?;
+
+    if git_bash.ends_with("git-bash.exe") {
+        Command::new(git_bash)
+            .current_dir(&target)
+            .spawn()
+            .map_err(|e| e.to_string())?;
+    } else {
+        Command::new(git_bash)
+            .args(["--login", "-i"])
+            .current_dir(&target)
+            .spawn()
+            .map_err(|e| e.to_string())?;
+    }
+
+    Ok("Opened Git Bash".into())
 }
 
 #[tauri::command]
@@ -771,9 +1212,12 @@ pub fn run() {
             save_config_file,
             get_logs,
             get_process_metrics,
+            get_system_metrics,
             set_service_version,
             control_service,
             open_external,
+            open_in_terminal,
+            open_git_bash,
             kill_process
         ])
         .run(tauri::generate_context!())

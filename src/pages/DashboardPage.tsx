@@ -1,10 +1,10 @@
 import { useEffect, useMemo, useState } from 'react';
 import { Badge, Button, Card, Group, Select, SimpleGrid, Stack, Text, Title } from '@mantine/core';
-import { IconDatabase, IconRefresh, IconTool, IconWorldWww } from '@tabler/icons-react';
+import { IconBrandGit, IconDatabase, IconFolder, IconRefresh, IconTerminal2, IconTool, IconWorldWww } from '@tabler/icons-react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { notifications } from '@mantine/notifications';
 import { controlService, getServices, setServiceVersion } from '../lib/servicesApi';
-import { openExternal } from '../lib/externalLinks';
+import { openExternal, openGitBash, openInTerminal } from '../lib/externalLinks';
 import { useUiStore } from '../store/uiStore';
 import type { ManagedService } from '../types';
 
@@ -20,6 +20,10 @@ function serviceIcon(key: string) {
       return <IconWorldWww size={18} />;
     case 'mariadb':
       return <IconDatabase size={18} />;
+    case 'postgresql':
+      return <IconDatabase size={18} />;
+    case 'git':
+      return <IconBrandGit size={18} />;
     case 'localhost':
       return <IconWorldWww size={18} />;
     case 'phpmyadmin':
@@ -27,6 +31,15 @@ function serviceIcon(key: string) {
     default:
       return <IconTool size={18} />;
   }
+}
+
+function parentFolder(path: string | null | undefined) {
+  if (!path) return null;
+  if (/^https?:\/\//i.test(path)) return null;
+  const normalized = path.replace(/\//g, '\\');
+  const lastSlash = normalized.lastIndexOf('\\');
+  if (lastSlash <= 2) return normalized;
+  return normalized.slice(0, lastSlash);
 }
 
 export function DashboardPage() {
@@ -100,12 +113,18 @@ export function DashboardPage() {
       const hasVersionDropdown = (service.versions?.length ?? 0) > 0;
       const canControl = service.kind === 'process' || service.kind === 'windows-service';
       const canOpen = service.kind === 'app' || service.kind === 'runtime';
+      const isRuntime = service.kind === 'runtime';
+      const isGit = service.key === 'git';
+      const folderTarget = parentFolder(service.launchTarget);
       return {
         ...service,
         selectedVersion,
         hasVersionDropdown,
         canControl,
-        canOpen
+        canOpen,
+        isRuntime,
+        isGit,
+        folderTarget
       };
     });
   }, [selectedVersions, visibleServices]);
@@ -153,6 +172,14 @@ export function DashboardPage() {
             </Button>
             <Button size="xs" variant="light" leftSection={<IconTool size={14} />} onClick={() => void openExternal('http://localhost/phpmyadmin/')}>
               phpMyAdmin
+            </Button>
+            <Button
+              size="xs"
+              variant="light"
+              leftSection={<IconDatabase size={14} />}
+              onClick={() => void openExternal('C:\\Program Files\\pgAdmin 4\\runtime\\pgAdmin4.exe')}
+            >
+              pgAdmin
             </Button>
             <Button size="xs" variant="light" onClick={() => void runBulkAction('start')} loading={mutation.isPending}>
               Start All
@@ -203,6 +230,18 @@ export function DashboardPage() {
                   <Text size="xs" c="#9ca3af" mt={6}>
                     {service.detail}
                   </Text>
+                  <Group gap="xs" mt="xs">
+                    {service.port ? (
+                      <Badge variant="outline" color="blue">
+                        Port {service.port}
+                      </Badge>
+                    ) : null}
+                    {service.pid ? (
+                      <Badge variant="outline" color="gray">
+                        PID {service.pid}
+                      </Badge>
+                    ) : null}
+                  </Group>
                 </div>
 
                 {service.hasVersionDropdown ? (
@@ -265,6 +304,37 @@ export function DashboardPage() {
                       onClick={() => mutation.mutate({ key: service.key, action: 'restart', version: service.selectedVersion })}
                     >
                       Restart
+                    </Button>
+                  </Group>
+                ) : service.isRuntime ? (
+                  <Group grow>
+                    <Button
+                      color="blue"
+                      variant="filled"
+                      leftSection={<IconTerminal2 size={14} />}
+                      disabled={!service.folderTarget}
+                      onClick={() => {
+                        if (!service.folderTarget) return;
+                        if (service.isGit) {
+                          void openGitBash(service.folderTarget);
+                          return;
+                        }
+                        void openInTerminal(service.folderTarget);
+                      }}
+                    >
+                      {service.isGit ? 'Git Bash' : 'Terminal'}
+                    </Button>
+                    <Button
+                      color="dark"
+                      variant="filled"
+                      leftSection={<IconFolder size={14} />}
+                      disabled={!service.folderTarget}
+                      onClick={() => {
+                        if (!service.folderTarget) return;
+                        void openExternal(service.folderTarget);
+                      }}
+                    >
+                      Folder
                     </Button>
                   </Group>
                 ) : (

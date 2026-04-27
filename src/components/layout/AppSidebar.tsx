@@ -11,10 +11,10 @@ import type { AppPage } from '../../types';
 
 const items: Array<{ page: AppPage; label: string; icon: typeof IconLayoutDashboard }> = [
   { page: 'dashboard', label: 'Dashboard', icon: IconLayoutDashboard },
-  { page: 'discovery', label: 'Discovery', icon: IconFolderSearch },
   { page: 'config', label: 'Config Editor', icon: IconFileCode },
   { page: 'logs', label: 'Logs', icon: IconListDetails },
-  { page: 'monitor', label: 'Process Monitor', icon: IconGauge }
+  { page: 'monitor', label: 'Process Monitor', icon: IconGauge },
+  { page: 'discovery', label: 'Environment Paths', icon: IconFolderSearch }
 ];
 
 export function AppSidebar() {
