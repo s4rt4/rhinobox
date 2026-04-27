@@ -1,4 +1,5 @@
 import { AppShell, Box } from '@mantine/core';
+import { useDocumentVisibility } from '@mantine/hooks';
 import { useQuery } from '@tanstack/react-query';
 import { AppHeader } from './components/layout/AppHeader';
 import { AppFooter } from './components/layout/AppFooter';
@@ -8,6 +9,7 @@ import { DiscoveryPage } from './pages/DiscoveryPage';
 import { ConfigEditorPage } from './pages/ConfigEditorPage';
 import { LogsPage } from './pages/LogsPage';
 import { ProcessMonitorPage } from './pages/ProcessMonitorPage';
+import { AboutPage } from './pages/AboutPage';
 import { runtimeMode } from './lib/runtime';
 import { getServices } from './lib/servicesApi';
 import { getSystemMetrics } from './lib/systemMetricsApi';
@@ -16,19 +18,22 @@ import { useUiStore } from './store/uiStore';
 export function App() {
   const mode = runtimeMode();
   const activePage = useUiStore((state) => state.activePage);
+  const documentVisibility = useDocumentVisibility();
+  const isVisible = documentVisibility === 'visible';
   const servicesQuery = useQuery({
     queryKey: ['services'],
     queryFn: getServices,
-    refetchInterval: 10000,
+    refetchInterval: isVisible && activePage === 'dashboard' ? 15000 : false,
     refetchOnWindowFocus: false,
-    staleTime: 5000
+    staleTime: 15000,
+    placeholderData: (previousData) => previousData
   });
   const metricsQuery = useQuery({
     queryKey: ['system-metrics'],
     queryFn: getSystemMetrics,
-    refetchInterval: 8000,
+    refetchInterval: isVisible ? 12000 : false,
     refetchOnWindowFocus: false,
-    staleTime: 6000,
+    staleTime: 10000,
     placeholderData: (previousData) => previousData
   });
   const services = servicesQuery.data ?? [];
@@ -46,13 +51,23 @@ export function App() {
         return <LogsPage />;
       case 'monitor':
         return <ProcessMonitorPage />;
+      case 'about':
+        return <AboutPage />;
       default:
         return <DashboardPage />;
     }
   })();
 
   const contentMaxWidth =
-    activePage === 'dashboard' ? 780 : activePage === 'discovery' ? 980 : activePage === 'config' ? 1180 : 960;
+    activePage === 'dashboard'
+      ? 780
+      : activePage === 'discovery'
+        ? 980
+        : activePage === 'config'
+          ? 1180
+          : activePage === 'about'
+            ? 980
+            : 960;
 
   return (
     <AppShell

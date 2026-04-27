@@ -1,5 +1,5 @@
 export type ServiceStatus = 'running' | 'stopped' | 'unknown';
-export type AppPage = 'dashboard' | 'discovery' | 'config' | 'logs' | 'monitor';
+export type AppPage = 'dashboard' | 'discovery' | 'config' | 'logs' | 'monitor' | 'about';
 
 export interface ManagedService {
   key: string;

@@ -1,5 +1,5 @@
 import { useMemo, useState } from 'react';
-import { Button, Card, Group, Loader, ScrollArea, Stack, Table, Text, TextInput, Title } from '@mantine/core';
+import { Button, Card, Group, Loader, ScrollArea, SegmentedControl, Stack, Table, Text, TextInput, Title } from '@mantine/core';
 import { IconRefresh, IconSearch, IconX } from '@tabler/icons-react';
 import { notifications } from '@mantine/notifications';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
@@ -11,10 +11,12 @@ export function ProcessMonitorPage() {
   const activePage = useUiStore((state) => state.activePage);
   const queryClient = useQueryClient();
   const [search, setSearch] = useState('');
+  const [mode, setMode] = useState<'light' | 'detailed'>('light');
+  const isDetailed = mode === 'detailed';
 
   const monitorQuery = useQuery({
-    queryKey: ['process-metrics'],
-    queryFn: getProcessMetrics,
+    queryKey: ['process-metrics', mode],
+    queryFn: () => getProcessMetrics(isDetailed),
     enabled: activePage === 'monitor',
     refetchInterval: false,
     refetchOnWindowFocus: false,
@@ -43,10 +45,13 @@ export function ProcessMonitorPage() {
     const term = search.trim().toLowerCase();
     if (!term) return items;
     return items.filter((item) => {
-      const haystacks = [item.label, item.path ?? '', item.pid?.toString() ?? '', item.port?.toString() ?? ''];
+      const haystacks = [item.label, item.pid?.toString() ?? '', item.port?.toString() ?? ''];
+      if (isDetailed) {
+        haystacks.push(item.path ?? '');
+      }
       return haystacks.some((value) => value.toLowerCase().includes(term));
     });
-  }, [monitorQuery.data, search]);
+  }, [isDetailed, monitorQuery.data, search]);
 
   return (
     <Card withBorder radius="sm">
@@ -59,6 +64,15 @@ export function ProcessMonitorPage() {
             </Text>
           </div>
           <Group gap="xs">
+            <SegmentedControl
+              size="xs"
+              value={mode}
+              onChange={(value) => setMode(value as 'light' | 'detailed')}
+              data={[
+                { label: 'Light', value: 'light' },
+                { label: 'Detailed', value: 'detailed' }
+              ]}
+            />
             <Text size="xs" c="dimmed">
               {filtered.length}/{monitorQuery.data?.length ?? 0} proses
             </Text>
@@ -95,10 +109,10 @@ export function ProcessMonitorPage() {
                 <Table.Tr>
                   <Table.Th w={180}>Process</Table.Th>
                   <Table.Th w={90}>PID</Table.Th>
-                  <Table.Th w={80}>Port</Table.Th>
                   <Table.Th w={90}>Memory</Table.Th>
-                  <Table.Th w={80}>CPU</Table.Th>
-                  <Table.Th miw={260}>Path</Table.Th>
+                  {isDetailed ? <Table.Th w={80}>Port</Table.Th> : null}
+                  {isDetailed ? <Table.Th w={80}>CPU</Table.Th> : null}
+                  {isDetailed ? <Table.Th miw={260}>Path</Table.Th> : null}
                   <Table.Th w={140} ta="center">Action</Table.Th>
                 </Table.Tr>
               </Table.Thead>
@@ -113,14 +127,16 @@ export function ProcessMonitorPage() {
                         </Text>
                       </Table.Td>
                       <Table.Td>{metric.pid ?? '-'}</Table.Td>
-                      <Table.Td>{metric.port ?? '-'}</Table.Td>
                       <Table.Td>{typeof metric.memoryMb === 'number' ? `${metric.memoryMb.toFixed(1)} MB` : '-'}</Table.Td>
-                      <Table.Td>{typeof metric.cpuSeconds === 'number' ? `${metric.cpuSeconds.toFixed(1)} s` : '-'}</Table.Td>
-                      <Table.Td>
-                        <Text size="xs" c="dimmed" style={{ whiteSpace: 'pre-wrap', overflowWrap: 'anywhere', wordBreak: 'break-word' }}>
-                          {metric.path ?? '-'}
-                        </Text>
-                      </Table.Td>
+                      {isDetailed ? <Table.Td>{metric.port ?? '-'}</Table.Td> : null}
+                      {isDetailed ? <Table.Td>{typeof metric.cpuSeconds === 'number' ? `${metric.cpuSeconds.toFixed(1)} s` : '-'}</Table.Td> : null}
+                      {isDetailed ? (
+                        <Table.Td>
+                          <Text size="xs" c="dimmed" style={{ whiteSpace: 'pre-wrap', overflowWrap: 'anywhere', wordBreak: 'break-word' }}>
+                            {metric.path ?? '-'}
+                          </Text>
+                        </Table.Td>
+                      ) : null}
                       <Table.Td>
                         <Group justify="center" wrap="nowrap">
                           <Button

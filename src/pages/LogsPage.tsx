@@ -11,9 +11,10 @@ export function LogsPage() {
     queryKey: ['logs'],
     queryFn: getLogs,
     enabled: activePage === 'logs',
-    refetchInterval: 15000,
+    refetchInterval: false,
     refetchOnWindowFocus: false,
-    staleTime: 10000
+    staleTime: 30000,
+    placeholderData: (previousData) => previousData
   });
 
   return (

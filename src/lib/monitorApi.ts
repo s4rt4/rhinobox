@@ -33,13 +33,13 @@ function normalizeMetric(metric: RawProcessMetric): ProcessMetric {
   };
 }
 
-export async function getProcessMetrics(): Promise<ProcessMetric[]> {
+export async function getProcessMetrics(detailed = false): Promise<ProcessMetric[]> {
   if (isTauriRuntime()) {
-    const data = await invoke<RawProcessMetric[]>('get_process_metrics');
+    const data = await invoke<RawProcessMetric[]>('get_process_metrics', { detailed });
     return data.map(normalizeMetric);
   }
 
-  const response = await fetch('/api/process-monitor.php', { headers: { Accept: 'application/json' } });
+  const response = await fetch(`/api/process-monitor.php${detailed ? '?detailed=1' : ''}`, { headers: { Accept: 'application/json' } });
   if (!response.ok) {
     throw new Error(`Monitor API failed with ${response.status}`);
   }

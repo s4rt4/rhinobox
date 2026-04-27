@@ -1,12 +1,27 @@
 use serde::{Deserialize, Serialize};
 use once_cell::sync::Lazy;
-use std::{fs, path::Path, process::Command, sync::Mutex, time::Instant};
+use std::{
+    collections::{HashMap, HashSet},
+    fs,
+    path::Path,
+    process::Command,
+    sync::{
+        atomic::{AtomicBool, Ordering},
+        Mutex,
+    },
+    time::Instant,
+};
 use sysinfo::{Disks, Networks, System};
-use tauri::Manager;
+use tauri::{
+    image::Image,
+    menu::{MenuBuilder, MenuItemBuilder},
+    tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent},
+    Manager, WindowEvent,
+};
 
 const SERVICE_SELECTION_FILE: &str = "C:\\www\\rhinobox\\service-selection.json";
 
-#[derive(Serialize, Deserialize)]
+#[derive(Serialize, Deserialize, Clone)]
 #[serde(rename_all = "snake_case")]
 enum ServiceStatus {
     Running,
@@ -14,7 +29,7 @@ enum ServiceStatus {
     Unknown,
 }
 
-#[derive(Serialize)]
+#[derive(Serialize, Clone)]
 struct ManagedService {
     key: String,
     label: String,
@@ -105,7 +120,47 @@ struct NetworkSnapshot {
     transmitted_bytes: u64,
 }
 
+#[derive(Clone)]
+struct ServiceSnapshot {
+    timestamp: Instant,
+    services: Vec<ManagedService>,
+}
+
+#[derive(Clone)]
+struct RuntimeDiscoverySnapshot {
+    timestamp: Instant,
+    nginx_versions: Vec<String>,
+    php_versions: Vec<String>,
+    mariadb_versions: Vec<String>,
+    postgresql_versions: Vec<String>,
+    node_versions: Vec<String>,
+    node_version_paths: Vec<(String, String)>,
+    python_path: Option<String>,
+    python_version: Option<String>,
+    go_path: Option<String>,
+    go_version: Option<String>,
+    postgresql_path: Option<String>,
+    git_path: Option<String>,
+    git_version: Option<String>,
+}
+
 static NETWORK_SNAPSHOT: Lazy<Mutex<Option<NetworkSnapshot>>> = Lazy::new(|| Mutex::new(None));
+static SERVICE_SNAPSHOT: Lazy<Mutex<Option<ServiceSnapshot>>> = Lazy::new(|| Mutex::new(None));
+static RUNTIME_DISCOVERY_SNAPSHOT: Lazy<Mutex<Option<RuntimeDiscoverySnapshot>>> =
+    Lazy::new(|| Mutex::new(None));
+
+#[derive(Default)]
+struct AppLifecycleState {
+    allow_exit: AtomicBool,
+}
+
+fn show_main_window<R: tauri::Runtime, M: Manager<R>>(manager: &M) {
+    if let Some(window) = manager.get_webview_window("main") {
+        let _ = window.unminimize();
+        let _ = window.show();
+        let _ = window.set_focus();
+    }
+}
 
 fn powershell(script: &str) -> Result<String, String> {
     let output = Command::new("powershell")
@@ -154,6 +209,57 @@ fn command_version(program: &str, args: &[&str]) -> Option<String> {
         .and_then(|output| output.lines().next().map(|line| line.trim().to_string()))
 }
 
+fn invalidate_service_snapshot() {
+    if let Ok(mut snapshot) = SERVICE_SNAPSHOT.lock() {
+        *snapshot = None;
+    }
+}
+
+fn runtime_discovery_snapshot() -> RuntimeDiscoverySnapshot {
+    if let Ok(snapshot) = RUNTIME_DISCOVERY_SNAPSHOT.lock() {
+        if let Some(snapshot) = snapshot.as_ref() {
+            if snapshot.timestamp.elapsed().as_secs_f64() < 180.0 {
+                return snapshot.clone();
+            }
+        }
+    }
+
+    let node_version_paths = node_versions_with_paths();
+    let snapshot = RuntimeDiscoverySnapshot {
+        timestamp: Instant::now(),
+        nginx_versions: installed_nginx_versions(),
+        php_versions: installed_php_versions(),
+        mariadb_versions: vec!["12.2.2".into()],
+        postgresql_versions: postgresql_bin_path()
+            .and_then(|path| command_version(&path, &["--version"]))
+            .map(|version| version.replace("psql (PostgreSQL)", "").trim().to_string())
+            .into_iter()
+            .collect(),
+        node_versions: node_version_paths.iter().map(|(version, _)| version.clone()).collect(),
+        node_version_paths,
+        python_path: command_exists_path("python"),
+        python_version: command_version("python", &["--version"]),
+        go_path: command_exists_path("go"),
+        go_version: command_version("go", &["version"]),
+        postgresql_path: postgresql_bin_path(),
+        git_path: command_exists_path("git").or_else(|| {
+            let primary = "C:\\Program Files\\Git\\cmd\\git.exe".to_string();
+            if Path::new(&primary).exists() {
+                Some(primary)
+            } else {
+                None
+            }
+        }),
+        git_version: command_version("git", &["--version"]),
+    };
+
+    if let Ok(mut cached) = RUNTIME_DISCOVERY_SNAPSHOT.lock() {
+        *cached = Some(snapshot.clone());
+    }
+
+    snapshot
+}
+
 fn installed_status(path: Option<&String>) -> ServiceStatus {
     if path.is_some() {
         ServiceStatus::Running
@@ -162,15 +268,7 @@ fn installed_status(path: Option<&String>) -> ServiceStatus {
     }
 }
 
-fn exe_name(name: &str) -> String {
-    if name.to_ascii_lowercase().ends_with(".exe") {
-        name.to_string()
-    } else {
-        format!("{name}.exe")
-    }
-}
-
-fn parse_tasklist_pid(line: &str) -> Option<u32> {
+fn parse_tasklist_row(line: &str) -> Option<(String, u32)> {
     let trimmed = line.trim();
     if trimmed.is_empty() {
         return None;
@@ -181,28 +279,46 @@ fn parse_tasklist_pid(line: &str) -> Option<u32> {
         return None;
     }
 
-    let pid = parts.get(1)?.trim_matches('"');
-    pid.parse::<u32>().ok()
+    let image = parts.first()?.trim_matches('"').to_string();
+    let pid = parts.get(1)?.trim_matches('"').parse::<u32>().ok()?;
+    Some((image, pid))
 }
 
-fn process_id_by_name(name: &str) -> Option<u32> {
-    let image = exe_name(name);
-    let filter = format!("IMAGENAME eq {image}");
-    let output = command_output("tasklist", &["/FO", "CSV", "/NH", "/FI", &filter]).ok()?;
-    output.lines().find_map(parse_tasklist_pid)
-}
-
-fn port_is_listening(port: u16) -> bool {
-    let marker = format!(":{port}");
-    command_output("netstat", &["-ano", "-p", "tcp"])
+fn process_id_map() -> HashMap<String, u32> {
+    command_output("tasklist", &["/FO", "CSV", "/NH"])
         .ok()
         .map(|output| {
-            output.lines().any(|line| {
-                let upper = line.to_ascii_uppercase();
-                upper.contains("LISTENING") && line.contains(&marker)
+            output
+                .lines()
+                .filter_map(parse_tasklist_row)
+                .fold(HashMap::new(), |mut acc, (image, pid)| {
+                    acc.entry(image.to_ascii_lowercase()).or_insert(pid);
+                    acc
+                })
+        })
+        .unwrap_or_default()
+}
+
+fn parse_listening_ports(output: &str) -> HashSet<u16> {
+    output
+        .lines()
+        .filter(|line| line.to_ascii_uppercase().contains("LISTENING"))
+        .filter_map(|line| {
+            line.split_whitespace().nth(1).and_then(|local| {
+                local
+                    .rsplit(':')
+                    .next()
+                    .and_then(|port| port.parse::<u16>().ok())
             })
         })
-        .unwrap_or(false)
+        .collect()
+}
+
+fn listening_ports() -> HashSet<u16> {
+    command_output("netstat", &["-ano", "-p", "tcp"])
+        .ok()
+        .map(|output| parse_listening_ports(&output))
+        .unwrap_or_default()
 }
 
 fn windows_service_status(name: &str) -> ServiceStatus {
@@ -218,14 +334,6 @@ fn windows_service_status(name: &str) -> ServiceStatus {
             }
         }
         Err(_) => ServiceStatus::Unknown,
-    }
-}
-
-fn process_status(name: &str) -> ServiceStatus {
-    if process_id_by_name(name).is_some() {
-        ServiceStatus::Running
-    } else {
-        ServiceStatus::Stopped
     }
 }
 
@@ -366,13 +474,6 @@ fn node_versions_with_paths() -> Vec<(String, String)> {
     versions
 }
 
-fn node_path_for_version(version: &str) -> Option<String> {
-    node_versions_with_paths()
-        .into_iter()
-        .find(|(found_version, _)| found_version == version)
-        .map(|(_, path)| path)
-}
-
 fn nginx_version_path(version: &str) -> Option<String> {
     match version {
         "1.29.8" => Some("C:\\Users\\Admin\\AppData\\Local\\Microsoft\\WinGet\\Packages\\nginxinc.nginx_Microsoft.Winget.Source_8wekyb3d8bbwe\\nginx-1.29.8".into()),
@@ -497,11 +598,20 @@ fn latest_matching_file(dir: &str, prefix: &str, suffix: &str) -> Option<String>
 }
 
 fn get_services_inner() -> Vec<ManagedService> {
-    let nginx_versions = service_versions("nginx");
-    let php_versions = service_versions("php_cgi");
-    let mariadb_versions = service_versions("mariadb");
-    let postgresql_versions = service_versions("postgresql");
-    let node_versions = service_versions("nodejs");
+    if let Ok(snapshot) = SERVICE_SNAPSHOT.lock() {
+        if let Some(snapshot) = snapshot.as_ref() {
+            if snapshot.timestamp.elapsed().as_secs_f64() < 4.0 {
+                return snapshot.services.clone();
+            }
+        }
+    }
+
+    let discovery = runtime_discovery_snapshot();
+    let nginx_versions = discovery.nginx_versions.clone();
+    let php_versions = discovery.php_versions.clone();
+    let mariadb_versions = discovery.mariadb_versions.clone();
+    let postgresql_versions = discovery.postgresql_versions.clone();
+    let node_versions = discovery.node_versions.clone();
     let nginx_current = get_selected_service_version("nginx")
         .or_else(|| nginx_versions.first().cloned());
     let php_current = get_selected_service_version("php_cgi")
@@ -515,39 +625,40 @@ fn get_services_inner() -> Vec<ManagedService> {
         .or_else(|| node_versions.first().cloned());
     let node_path = node_current
         .as_deref()
-        .and_then(node_path_for_version)
-        .or_else(|| {
-            let primary = "C:\\Program Files\\nodejs\\node.exe".to_string();
-            if Path::new(&primary).exists() {
-                Some(primary)
-            } else {
-                command_exists_path("node")
-            }
-        });
-    let python_path = command_exists_path("python");
-    let go_path = command_exists_path("go");
+        .and_then(|version| {
+            discovery
+                .node_version_paths
+                .iter()
+                .find(|(found_version, _)| found_version == version)
+                .map(|(_, path)| path.clone())
+        })
+        .or_else(|| discovery.node_version_paths.first().map(|(_, path)| path.clone()));
+    let python_path = discovery.python_path.clone();
+    let go_path = discovery.go_path.clone();
     let postgresql_service = postgresql_service_name();
-    let postgresql_path = postgresql_bin_path();
-    let git_path = command_exists_path("git")
-        .or_else(|| {
-            let primary = "C:\\Program Files\\Git\\cmd\\git.exe".to_string();
-            if Path::new(&primary).exists() {
-                Some(primary)
-            } else {
-                None
-            }
-        });
-    let localhost_ready = port_is_listening(80);
-    let phpmyadmin_ready = localhost_ready && port_is_listening(9000);
+    let postgresql_path = discovery.postgresql_path.clone();
+    let git_path = discovery.git_path.clone();
+    let ports = listening_ports();
+    let localhost_ready = ports.contains(&80);
+    let phpmyadmin_ready = localhost_ready && ports.contains(&9000);
+    let processes = process_id_map();
+    let nginx_pid = processes.get("nginx.exe").copied();
+    let php_cgi_pid = processes.get("php-cgi.exe").copied();
+    let mariadb_pid = processes.get("mariadb.exe").copied();
+    let postgres_pid = processes.get("postgres.exe").copied();
+    let node_pid = processes.get("node.exe").copied();
+    let python_pid = processes.get("python.exe").copied();
+    let go_pid = processes.get("go.exe").copied();
+    let git_pid = processes.get("git.exe").copied();
 
-    vec![
+    let services = vec![
         ManagedService {
             key: "nginx".into(),
             label: "nginx".into(),
-            status: process_status("nginx"),
+            status: if nginx_pid.is_some() { ServiceStatus::Running } else { ServiceStatus::Stopped },
             detail: "Web server for localhost and phpMyAdmin".into(),
             port: Some(80),
-            pid: process_id_by_name("nginx"),
+            pid: nginx_pid,
             can_reload: true,
             kind: "process".into(),
             current_version: nginx_current,
@@ -557,10 +668,10 @@ fn get_services_inner() -> Vec<ManagedService> {
         ManagedService {
             key: "php_cgi".into(),
             label: "PHP-CGI".into(),
-            status: process_status("php-cgi"),
+            status: if php_cgi_pid.is_some() { ServiceStatus::Running } else { ServiceStatus::Stopped },
             detail: "FastCGI bridge for PHP requests".into(),
-            port: if port_is_listening(9000) { Some(9000) } else { None },
-            pid: process_id_by_name("php-cgi"),
+            port: if ports.contains(&9000) { Some(9000) } else { None },
+            pid: php_cgi_pid,
             can_reload: false,
             kind: "process".into(),
             current_version: php_current,
@@ -572,8 +683,8 @@ fn get_services_inner() -> Vec<ManagedService> {
             label: "MariaDB".into(),
             status: windows_service_status("MariaDB"),
             detail: "Primary local database service".into(),
-            port: if port_is_listening(3306) { Some(3306) } else { None },
-            pid: process_id_by_name("mariadb"),
+            port: if ports.contains(&3306) { Some(3306) } else { None },
+            pid: mariadb_pid,
             can_reload: false,
             kind: "windows-service".into(),
             current_version: mariadb_current,
@@ -585,8 +696,8 @@ fn get_services_inner() -> Vec<ManagedService> {
             label: "PostgreSQL".into(),
             status: windows_service_status(&postgresql_service),
             detail: "Primary PostgreSQL database service".into(),
-            port: if port_is_listening(5432) { Some(5432) } else { None },
-            pid: process_id_by_name("postgres"),
+            port: if ports.contains(&5432) { Some(5432) } else { None },
+            pid: postgres_pid,
             can_reload: false,
             kind: "windows-service".into(),
             current_version: postgresql_current,
@@ -599,7 +710,7 @@ fn get_services_inner() -> Vec<ManagedService> {
             status: if localhost_ready { ServiceStatus::Running } else { ServiceStatus::Stopped },
             detail: "Landing page lokal untuk stack web kamu".into(),
             port: if localhost_ready { Some(80) } else { None },
-            pid: process_id_by_name("nginx"),
+            pid: nginx_pid,
             can_reload: false,
             kind: "app".into(),
             current_version: Some("http://localhost".into()),
@@ -612,7 +723,7 @@ fn get_services_inner() -> Vec<ManagedService> {
             status: if phpmyadmin_ready { ServiceStatus::Running } else { ServiceStatus::Stopped },
             detail: "Admin panel database lokal".into(),
             port: if localhost_ready { Some(80) } else { None },
-            pid: process_id_by_name("php-cgi"),
+            pid: php_cgi_pid,
             can_reload: false,
             kind: "app".into(),
             current_version: Some("ready".into()),
@@ -625,7 +736,7 @@ fn get_services_inner() -> Vec<ManagedService> {
             status: installed_status(node_path.as_ref()),
             detail: "JavaScript runtime untuk tooling dan frontend".into(),
             port: None,
-            pid: process_id_by_name("node"),
+            pid: node_pid,
             can_reload: false,
             kind: "runtime".into(),
             current_version: node_current,
@@ -638,10 +749,10 @@ fn get_services_inner() -> Vec<ManagedService> {
             status: installed_status(python_path.as_ref()),
             detail: "Runtime scripting dan automation".into(),
             port: None,
-            pid: process_id_by_name("python"),
+            pid: python_pid,
             can_reload: false,
             kind: "runtime".into(),
-            current_version: command_version("python", &["--version"]),
+            current_version: discovery.python_version.clone(),
             versions: Vec::new(),
             launch_target: python_path,
         },
@@ -651,10 +762,10 @@ fn get_services_inner() -> Vec<ManagedService> {
             status: installed_status(go_path.as_ref()),
             detail: "Runtime dan toolchain Go".into(),
             port: None,
-            pid: process_id_by_name("go"),
+            pid: go_pid,
             can_reload: false,
             kind: "runtime".into(),
-            current_version: command_version("go", &["version"]),
+            current_version: discovery.go_version.clone(),
             versions: Vec::new(),
             launch_target: go_path,
         },
@@ -664,23 +775,32 @@ fn get_services_inner() -> Vec<ManagedService> {
             status: installed_status(git_path.as_ref()),
             detail: "Version control tooling".into(),
             port: None,
-            pid: process_id_by_name("git"),
+            pid: git_pid,
             can_reload: false,
             kind: "runtime".into(),
-            current_version: command_version("git", &["--version"])
-                .or_else(|| command_version("C:\\Program Files\\Git\\cmd\\git.exe", &["--version"])),
+            current_version: discovery.git_version.clone(),
             versions: Vec::new(),
             launch_target: git_path,
         },
-    ]
+    ];
+
+    if let Ok(mut snapshot) = SERVICE_SNAPSHOT.lock() {
+        *snapshot = Some(ServiceSnapshot {
+            timestamp: Instant::now(),
+            services: services.clone(),
+        });
+    }
+
+    services
 }
 
 #[tauri::command]
 fn get_discovery() -> Vec<DiscoveryItem> {
+    let discovery = runtime_discovery_snapshot();
     let nginx_current = get_selected_service_version("nginx").unwrap_or_else(|| "1.29.8".into());
     let php_current = get_selected_service_version("php_cgi").unwrap_or_else(|| "8.4.20".into());
     let node_current = get_selected_service_version("nodejs")
-        .or_else(|| service_versions("nodejs").first().cloned());
+        .or_else(|| discovery.node_versions.first().cloned());
     let nginx_root = nginx_version_path(&nginx_current).unwrap_or_else(|| {
         "C:\\Users\\Admin\\AppData\\Local\\Microsoft\\WinGet\\Packages\\nginxinc.nginx_Microsoft.Winget.Source_8wekyb3d8bbwe\\nginx-1.29.8".into()
     });
@@ -689,8 +809,14 @@ fn get_discovery() -> Vec<DiscoveryItem> {
     });
     let node_path = node_current
         .as_deref()
-        .and_then(node_path_for_version)
-        .or_else(|| command_exists_path("node"))
+        .and_then(|version| {
+            discovery
+                .node_version_paths
+                .iter()
+                .find(|(found_version, _)| found_version == version)
+                .map(|(_, path)| path.clone())
+        })
+        .or_else(|| discovery.node_version_paths.first().map(|(_, path)| path.clone()))
         .unwrap_or_else(|| "C:\\Program Files\\nodejs\\node.exe".into());
 
     vec![
@@ -825,6 +951,8 @@ fn save_config_file(
         }
     }
 
+    invalidate_service_snapshot();
+
     Ok("Config saved with backup".into())
 }
 
@@ -890,10 +1018,11 @@ fn get_logs() -> Vec<LogTarget> {
         .collect()
 }
 
-fn get_process_metrics_inner() -> Vec<ProcessMetric> {
+fn get_process_metrics_inner(detailed: bool) -> Vec<ProcessMetric> {
     let current_pid = std::process::id();
-    let script = format!(
-        r#"
+    let script = if detailed {
+        format!(
+            r#"
 $portMap = @{{}}
 Get-NetTCPConnection -State Listen -ErrorAction SilentlyContinue |
   Group-Object OwningProcess |
@@ -924,7 +1053,29 @@ $items = Get-Process -ErrorAction SilentlyContinue | Sort-Object ProcessName, Id
 
 $items | ConvertTo-Json -Depth 4
 "#
-    );
+        )
+    } else {
+        format!(
+            r#"
+$items = Get-Process -ErrorAction SilentlyContinue | Sort-Object ProcessName, Id | ForEach-Object {{
+  [pscustomobject]@{{
+    key = [string]$_.Id
+    label = $_.ProcessName
+    status = 'running'
+    pid = $_.Id
+    port = $null
+    memory_mb = [math]::Round($_.WorkingSet64 / 1MB, 1)
+    cpu_seconds = $null
+    kind = 'windows-process'
+    path = $null
+    can_kill = if ($_.Id -in 0, 4, {current_pid}) {{ $false }} else {{ $true }}
+  }}
+}}
+
+$items | ConvertTo-Json -Depth 4
+"#
+        )
+    };
 
     let output = powershell(&script).unwrap_or_else(|_| "[]".into());
     let mut items = serde_json::from_str::<Vec<ProcessMetric>>(&output).unwrap_or_default();
@@ -1015,13 +1166,14 @@ fn set_service_version(key: String, version: String) -> Result<String, String> {
         return Err("Version is not installed".into());
     }
     set_selected_service_version(&key, &version)?;
+    invalidate_service_snapshot();
     Ok(format!("{key} version set to {version}"))
 }
 
 fn control_service_inner(key: String, action: String, version: Option<String>) -> Result<String, String> {
     let chosen_version = version.or_else(|| get_selected_service_version(&key));
 
-    match (key.as_str(), action.as_str()) {
+    let result = match (key.as_str(), action.as_str()) {
         ("nginx", "start") => {
             let version = chosen_version.unwrap_or_else(|| "1.29.8".into());
             set_selected_service_version("nginx", &version)?;
@@ -1081,7 +1233,13 @@ fn control_service_inner(key: String, action: String, version: Option<String>) -
         ("postgresql", "stop") => powershell("Stop-Service -Name 'postgresql-x64-17' -Force; 'PostgreSQL stopped'"),
         ("postgresql", "restart") => powershell("Restart-Service -Name 'postgresql-x64-17' -Force; 'PostgreSQL restarted'"),
         _ => Err("Unsupported service action".into()),
+    };
+
+    if result.is_ok() {
+        invalidate_service_snapshot();
     }
+
+    result
 }
 
 #[tauri::command]
@@ -1208,8 +1366,9 @@ fn kill_process_inner(pid: u32) -> Result<String, String> {
 }
 
 #[tauri::command]
-async fn get_process_metrics() -> Result<Vec<ProcessMetric>, String> {
-    tauri::async_runtime::spawn_blocking(get_process_metrics_inner)
+async fn get_process_metrics(detailed: Option<bool>) -> Result<Vec<ProcessMetric>, String> {
+    let detailed = detailed.unwrap_or(false);
+    tauri::async_runtime::spawn_blocking(move || get_process_metrics_inner(detailed))
         .await
         .map_err(|e| e.to_string())
 }
@@ -1224,13 +1383,65 @@ async fn kill_process(pid: u32) -> Result<String, String> {
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
+        .manage(AppLifecycleState::default())
         .setup(|app| {
+            let icon = Image::from_bytes(include_bytes!("../icons/icon.ico"))?;
+
+            let open_item = MenuItemBuilder::with_id("tray_open", "Open RhinoBOX").build(app)?;
+            let close_item = MenuItemBuilder::with_id("tray_close", "Close RhinoBOX").build(app)?;
+            let tray_menu = MenuBuilder::new(app)
+                .item(&open_item)
+                .separator()
+                .item(&close_item)
+                .build()?;
+
+            TrayIconBuilder::with_id("main-tray")
+                .icon(icon.clone())
+                .tooltip("RhinoBOX")
+                .menu(&tray_menu)
+                .show_menu_on_left_click(false)
+                .on_tray_icon_event(|tray, event| {
+                    if let TrayIconEvent::Click {
+                        button: MouseButton::Left,
+                        button_state: MouseButtonState::Up,
+                        ..
+                    } = event
+                    {
+                        show_main_window(tray.app_handle());
+                    }
+                })
+                .on_menu_event(|app, event| match event.id().as_ref() {
+                    "tray_open" => show_main_window(app),
+                    "tray_close" => {
+                        app.state::<AppLifecycleState>()
+                            .allow_exit
+                            .store(true, Ordering::SeqCst);
+                        app.exit(0);
+                    }
+                    _ => {}
+                })
+                .build(app)?;
+
             if let Some(window) = app.get_webview_window("main") {
-                if let Ok(icon) = tauri::image::Image::from_bytes(include_bytes!("../icons/icon.ico")) {
-                    let _ = window.set_icon(icon);
-                }
+                let _ = window.set_icon(icon);
             }
             Ok(())
+        })
+        .on_window_event(|window, event| {
+            if window.label() != "main" {
+                return;
+            }
+
+            if let WindowEvent::CloseRequested { api, .. } = event {
+                if !window
+                    .state::<AppLifecycleState>()
+                    .allow_exit
+                    .load(Ordering::SeqCst)
+                {
+                    api.prevent_close();
+                    let _ = window.hide();
+                }
+            }
         })
         .invoke_handler(tauri::generate_handler![
             get_services,

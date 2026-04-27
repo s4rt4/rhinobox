@@ -1,5 +1,6 @@
 import { NavLink, Stack, ThemeIcon } from '@mantine/core';
 import {
+  IconInfoCircle,
   IconFileCode,
   IconFolderSearch,
   IconGauge,
@@ -14,7 +15,8 @@ const items: Array<{ page: AppPage; label: string; icon: typeof IconLayoutDashbo
   { page: 'config', label: 'Config Editor', icon: IconFileCode },
   { page: 'logs', label: 'Logs', icon: IconListDetails },
   { page: 'monitor', label: 'Process Monitor', icon: IconGauge },
-  { page: 'discovery', label: 'Environment Paths', icon: IconFolderSearch }
+  { page: 'discovery', label: 'Environment Paths', icon: IconFolderSearch },
+  { page: 'about', label: 'About', icon: IconInfoCircle }
 ];
 
 export function AppSidebar() {

@@ -51,9 +51,10 @@ export function DashboardPage() {
     queryKey: ['services'],
     queryFn: getServices,
     enabled: activePage === 'dashboard',
-    refetchInterval: 10000,
+    refetchInterval: false,
     refetchOnWindowFocus: false,
-    staleTime: 5000
+    staleTime: 15000,
+    placeholderData: (previousData) => previousData
   });
 
   const mutation = useMutation({
