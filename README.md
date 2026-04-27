@@ -1,3 +1,7 @@
+<p align="center">
+  <img src="assets/branding/rhinobox.png" alt="RhinoBOX" width="120">
+</p>
+
 # RhinoBOX
 
 RhinoBOX is a desktop utility for managing a local development environment on Windows.
@@ -140,4 +144,4 @@ Planned evolution includes:
 
 ## License
 
-At the moment, no license file has been added yet.
+This project is licensed under the MIT License. See [LICENSE](LICENSE).
