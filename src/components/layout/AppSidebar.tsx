@@ -4,6 +4,7 @@ import {
   IconFileCode,
   IconFolderSearch,
   IconGauge,
+  IconFolderCode,
   IconLink,
   IconLayoutDashboard,
   IconListDetails
@@ -13,6 +14,7 @@ import type { AppPage } from '../../types';
 
 const items: Array<{ page: AppPage; label: string; icon: typeof IconLayoutDashboard }> = [
   { page: 'dashboard', label: 'Dashboard', icon: IconLayoutDashboard },
+  { page: 'projects', label: 'Projects', icon: IconFolderCode },
   { page: 'vhosts', label: 'Virtual Domains', icon: IconLink },
   { page: 'config', label: 'Config Editor', icon: IconFileCode },
   { page: 'logs', label: 'Logs', icon: IconListDetails },

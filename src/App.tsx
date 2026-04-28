@@ -6,6 +6,7 @@ import { AppHeader } from './components/layout/AppHeader';
 import { AppFooter } from './components/layout/AppFooter';
 import { AppSidebar } from './components/layout/AppSidebar';
 import { DashboardPage } from './pages/DashboardPage';
+import { ProjectsPage } from './pages/ProjectsPage';
 import { VirtualHostsPage } from './pages/VirtualHostsPage';
 import { DiscoveryPage } from './pages/DiscoveryPage';
 import { ConfigEditorPage } from './pages/ConfigEditorPage';
@@ -60,6 +61,8 @@ export function App() {
         return <DiscoveryPage />;
       case 'config':
         return <ConfigEditorPage />;
+      case 'projects':
+        return <ProjectsPage />;
       case 'vhosts':
         return <VirtualHostsPage />;
       case 'logs':
@@ -76,6 +79,8 @@ export function App() {
   const contentMaxWidth =
     activePage === 'dashboard'
       ? 920
+      : activePage === 'projects'
+        ? 1040
       : activePage === 'vhosts'
         ? 1100
       : activePage === 'discovery'

@@ -27,3 +27,12 @@ export async function openGitBash(path: string) {
 
   window.open(path, '_blank', 'noopener,noreferrer');
 }
+
+export async function openInCode(path: string) {
+  if (isTauriRuntime()) {
+    await invoke('open_in_code', { path });
+    return;
+  }
+
+  window.open(`vscode://file/${path.replace(/\\/g, '/')}`, '_blank', 'noopener,noreferrer');
+}

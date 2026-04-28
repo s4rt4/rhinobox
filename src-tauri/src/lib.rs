@@ -105,6 +105,17 @@ struct DiscoveryItem {
 }
 
 #[derive(Serialize, Clone)]
+struct ProjectSummary {
+    name: String,
+    path: String,
+    kind: String,
+    domain: Option<String>,
+    url: String,
+    has_vhost: bool,
+    has_public_dir: bool,
+}
+
+#[derive(Serialize, Clone)]
 struct ConfigFileSummary {
     key: String,
     label: String,
@@ -687,6 +698,88 @@ fn write_virtual_host_records(records: &[VirtualHostRecord]) -> Result<(), Strin
     }
     let content = serde_json::to_string_pretty(records).map_err(|e| e.to_string())?;
     fs::write(VHOSTS_FILE, content).map_err(|e| e.to_string())
+}
+
+fn normalize_windows_path(path: &str) -> String {
+    path.replace('/', "\\")
+        .trim_end_matches('\\')
+        .to_ascii_lowercase()
+}
+
+fn detect_project_kind(path: &str) -> String {
+    let has = |relative: &str| Path::new(&format!("{path}\\{relative}")).exists();
+
+    if has("artisan") {
+        "Laravel".into()
+    } else if has("wp-config.php") || has("wp-content") {
+        "WordPress".into()
+    } else if has("composer.json") {
+        "PHP".into()
+    } else if has("package.json") {
+        "Node.js".into()
+    } else if has("go.mod") {
+        "Go".into()
+    } else if has("pyproject.toml") || has("requirements.txt") {
+        "Python".into()
+    } else if has("index.php") || has("public\\index.php") {
+        "PHP site".into()
+    } else if has("index.html") || has("public\\index.html") {
+        "Static site".into()
+    } else {
+        "Folder".into()
+    }
+}
+
+fn list_projects_inner() -> Vec<ProjectSummary> {
+    let web_root = "C:\\www";
+    let ignored = ["phpmyadmin", "rhinobox", "runtimes"];
+    let vhosts = read_virtual_host_records();
+    let mut projects = Vec::new();
+
+    let Ok(entries) = fs::read_dir(web_root) else {
+        return projects;
+    };
+
+    for entry in entries.flatten() {
+        let Ok(metadata) = entry.metadata() else {
+            continue;
+        };
+        if !metadata.is_dir() {
+            continue;
+        }
+
+        let name = entry.file_name().to_string_lossy().to_string();
+        if name.starts_with('.') || ignored.iter().any(|item| item.eq_ignore_ascii_case(&name)) {
+            continue;
+        }
+
+        let path = entry.path().to_string_lossy().to_string();
+        let normalized_path = normalize_windows_path(&path);
+        let matched_vhost = vhosts.iter().find(|record| {
+            normalize_windows_path(&record.root) == normalized_path
+                || record.name.eq_ignore_ascii_case(&name)
+        });
+        let domain = matched_vhost.map(|record| record.domain.clone());
+        let has_vhost = domain.is_some();
+        let has_public_dir = Path::new(&format!("{path}\\public")).is_dir();
+        let url = domain
+            .as_ref()
+            .map(|domain| format!("http://{domain}/"))
+            .unwrap_or_else(|| format!("http://localhost/{name}/"));
+
+        projects.push(ProjectSummary {
+            name,
+            kind: detect_project_kind(&path),
+            path,
+            domain,
+            url,
+            has_vhost,
+            has_public_dir,
+        });
+    }
+
+    projects.sort_by(|left, right| left.name.to_ascii_lowercase().cmp(&right.name.to_ascii_lowercase()));
+    projects
 }
 
 fn hosts_file_path() -> &'static str {
@@ -2066,6 +2159,27 @@ fn open_git_bash(path: String) -> Result<String, String> {
     Ok("Opened Git Bash".into())
 }
 
+#[tauri::command]
+fn open_in_code(path: String) -> Result<String, String> {
+    let code_path = command_exists_path("code")
+        .or_else(|| {
+            let candidate = "C:\\Users\\Admin\\AppData\\Local\\Programs\\Microsoft VS Code\\bin\\code.cmd".to_string();
+            if Path::new(&candidate).exists() {
+                Some(candidate)
+            } else {
+                None
+            }
+        })
+        .ok_or_else(|| "VS Code command not found".to_string())?;
+
+    new_background_command(&code_path)
+        .arg(path)
+        .spawn()
+        .map_err(|e| e.to_string())?;
+
+    Ok("Opened VS Code".into())
+}
+
 fn kill_process_inner(pid: u32) -> Result<String, String> {
     if pid == 0 || pid == 4 || pid == std::process::id() {
         return Err("Refusing to kill a protected process".into());
@@ -2105,6 +2219,13 @@ async fn kill_process(pid: u32) -> Result<String, String> {
 #[tauri::command]
 async fn list_virtual_hosts() -> Result<Vec<VirtualHostSummary>, String> {
     tauri::async_runtime::spawn_blocking(list_virtual_hosts_inner)
+        .await
+        .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+async fn list_projects() -> Result<Vec<ProjectSummary>, String> {
+    tauri::async_runtime::spawn_blocking(list_projects_inner)
         .await
         .map_err(|e| e.to_string())
 }
@@ -2204,7 +2325,9 @@ pub fn run() {
             open_external,
             open_in_terminal,
             open_git_bash,
+            open_in_code,
             kill_process,
+            list_projects,
             list_virtual_hosts,
             create_virtual_host,
             remove_virtual_host

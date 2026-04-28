@@ -1,5 +1,5 @@
 export type ServiceStatus = 'running' | 'stopped' | 'unknown';
-export type AppPage = 'dashboard' | 'vhosts' | 'discovery' | 'config' | 'logs' | 'monitor' | 'about';
+export type AppPage = 'dashboard' | 'projects' | 'vhosts' | 'discovery' | 'config' | 'logs' | 'monitor' | 'about';
 
 export interface ManagedService {
   key: string;
@@ -70,6 +70,16 @@ export interface VirtualHostSummary {
   configPath: string;
   configExists: boolean;
   hostsEnabled: boolean;
+}
+
+export interface ProjectSummary {
+  name: string;
+  path: string;
+  kind: string;
+  domain?: string | null;
+  url: string;
+  hasVhost: boolean;
+  hasPublicDir: boolean;
 }
 
 export interface SystemMetrics {
