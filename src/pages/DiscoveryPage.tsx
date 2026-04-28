@@ -106,7 +106,7 @@ export function DiscoveryPage() {
         </Text>
       ) : (
         <Card withBorder radius="sm" p={0} style={{ overflow: 'hidden' }}>
-          <ScrollArea type="auto" scrollbarSize={8}>
+          <ScrollArea type="auto" scrollbarSize={5}>
             <Table verticalSpacing={7} highlightOnHover style={{ minWidth: 720, tableLayout: 'fixed' }}>
               <colgroup>
                 <col style={{ width: 96 }} />

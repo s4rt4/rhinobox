@@ -89,7 +89,7 @@ export function LogsPage() {
                     </Group>
                   </Group>
 
-                  <ScrollArea h="calc(100vh - 274px)" offsetScrollbars scrollbarSize={8} type="auto">
+                  <ScrollArea h="calc(100vh - 274px)" offsetScrollbars scrollbarSize={5} type="auto">
                     <Text
                       component="pre"
                       size="xs"

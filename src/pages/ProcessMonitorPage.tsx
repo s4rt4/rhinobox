@@ -103,7 +103,7 @@ export function ProcessMonitorPage() {
             Tidak ada proses yang cocok.
           </Text>
         ) : (
-          <ScrollArea h="calc(100vh - 250px)" offsetScrollbars scrollbarSize={8}>
+          <ScrollArea h="calc(100vh - 250px)" offsetScrollbars scrollbarSize={5}>
             <Table highlightOnHover withTableBorder withColumnBorders>
               <Table.Thead>
                 <Table.Tr>

@@ -178,7 +178,7 @@ export function ConfigEditorPage() {
                 <ScrollArea
                   h="calc(100vh - 276px)"
                   offsetScrollbars
-                  scrollbarSize={8}
+                  scrollbarSize={5}
                   type="auto"
                 >
                   <Textarea
