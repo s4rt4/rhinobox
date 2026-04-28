@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
-import { Badge, Button, Card, Code, Group, Loader, ScrollArea, Select, Stack, Switch, Text, TextInput, Textarea, Title } from '@mantine/core';
-import { IconSearch } from '@tabler/icons-react';
+import { Badge, Button, Card, Code, Group, Loader, ScrollArea, Stack, Switch, Text, TextInput, Textarea, Title, NavLink } from '@mantine/core';
+import { IconFileCode, IconSearch } from '@tabler/icons-react';
 import { notifications } from '@mantine/notifications';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { getConfigFile, getConfigFiles, saveConfigFile } from '../lib/configApi';
@@ -80,47 +80,66 @@ export function ConfigEditorPage() {
   });
 
   return (
-    <Card
-      withBorder
-      radius="sm"
-      style={{
-        minHeight: 'calc(100vh - 150px)',
-        display: 'flex',
-        flexDirection: 'column'
-      }}
-    >
-      <Stack gap="sm">
-        <div>
-          <Title order={4}>Config Editor</Title>
-          <Text c="dimmed" size="xs">
-            Edit file konfigurasi utama lokal. Saat ini fokus ke <code>nginx.conf</code> dan <code>php.ini</code>, lengkap dengan backup sebelum save.
-          </Text>
-        </div>
+    <Stack gap="xs">
+      <Card withBorder radius="sm" p="sm">
+        <Group justify="space-between" align="center">
+          <div>
+            <Title order={5}>Config Editor</Title>
+            <Text c="dimmed" size="xs">
+              Edit konfigurasi utama dengan backup sebelum save.
+            </Text>
+          </div>
+          {fileQuery.data ? (
+            <Group gap="xs">
+              <Badge variant="outline">{lineCount} lines</Badge>
+              <Badge variant="outline" color={fileQuery.data.exists === false ? 'red' : 'green'}>
+                {fileQuery.data.exists === false ? 'missing' : 'available'}
+              </Badge>
+              <Badge variant="outline" color={isDirty ? 'yellow' : 'gray'}>
+                {isDirty ? 'unsaved' : 'synced'}
+              </Badge>
+            </Group>
+          ) : null}
+        </Group>
+      </Card>
 
         {filesQuery.isLoading ? (
           <Group justify="center" py="xl">
             <Loader />
           </Group>
         ) : (
-          <>
-            <Select
-              size="xs"
-              label="Config target"
-              value={selectedKey}
-              onChange={setSelectedKey}
-              data={(filesQuery.data ?? []).map((item) => ({
-                value: item.key,
-                label: item.label
-              }))}
-            />
+          <Group align="stretch" gap="xs" wrap="nowrap">
+            <Card withBorder radius="sm" p={6} style={{ width: 210, flex: '0 0 210px' }}>
+              <Stack gap={4}>
+                {(filesQuery.data ?? []).map((item) => (
+                  <NavLink
+                    key={item.key}
+                    active={selectedKey === item.key}
+                    label={item.label}
+                    description={item.exists === false ? 'Missing' : undefined}
+                    leftSection={<IconFileCode size={16} />}
+                    onClick={() => setSelectedKey(item.key)}
+                    py={6}
+                    styles={{
+                      root: { borderRadius: 6 },
+                      label: { fontSize: 13, fontWeight: selectedKey === item.key ? 700 : 500 },
+                      description: { color: '#ff8787' }
+                    }}
+                  />
+                ))}
+              </Stack>
+            </Card>
 
             {fileQuery.isLoading ? (
+              <Card withBorder radius="sm" style={{ flex: 1 }}>
               <Group justify="center" py="xl">
                 <Loader />
               </Group>
+              </Card>
             ) : fileQuery.data ? (
-              <>
-                <Group justify="space-between" align="flex-start" wrap="nowrap">
+              <Card withBorder radius="sm" p="sm" style={{ flex: 1, minWidth: 0 }}>
+                <Stack gap="xs">
+                <Group justify="space-between" align="center" wrap="nowrap">
                   <Code
                     style={{
                       whiteSpace: 'pre-wrap',
@@ -132,13 +151,12 @@ export function ConfigEditorPage() {
                     {fileQuery.data.path}
                   </Code>
                   <Group gap="xs" wrap="nowrap" align="center">
-                    <Badge variant="outline">{lineCount} lines</Badge>
-                    <Badge variant="outline" color={fileQuery.data.exists === false ? 'red' : 'green'}>
-                      {fileQuery.data.exists === false ? 'missing' : 'available'}
-                    </Badge>
-                    <Badge variant="outline" color={isDirty ? 'yellow' : 'gray'}>
-                      {isDirty ? 'unsaved changes' : 'synced'}
-                    </Badge>
+                    <Switch
+                      size="sm"
+                      checked={reloadOnSave}
+                      onChange={(event) => setReloadOnSave(event.currentTarget.checked)}
+                      label="Reload"
+                    />
                   </Group>
                 </Group>
                 <Group grow align="flex-end">
@@ -157,13 +175,8 @@ export function ConfigEditorPage() {
                     <Badge variant="light">{matchCount}</Badge>
                   </Stack>
                 </Group>
-                <Switch
-                  checked={reloadOnSave}
-                  onChange={(event) => setReloadOnSave(event.currentTarget.checked)}
-                  label="Reload related service after save"
-                />
                 <ScrollArea
-                  h="calc(100vh - 370px)"
+                  h="calc(100vh - 276px)"
                   offsetScrollbars
                   scrollbarSize={8}
                   type="auto"
@@ -178,7 +191,7 @@ export function ConfigEditorPage() {
                       input: {
                         fontFamily: 'Consolas, monospace',
                         fontSize: 13,
-                        minHeight: 'calc(100vh - 400px)'
+                        minHeight: 'calc(100vh - 306px)'
                       }
                     }}
                   />
@@ -204,11 +217,11 @@ export function ConfigEditorPage() {
                     Save{reloadOnSave ? ' + Reload' : ''}
                   </Button>
                 </Group>
-              </>
+                </Stack>
+              </Card>
             ) : null}
-          </>
+          </Group>
         )}
-      </Stack>
-    </Card>
+    </Stack>
   );
 }

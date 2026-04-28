@@ -1,5 +1,6 @@
 import { Badge, Button, Card, Group, Loader, ScrollArea, Stack, Tabs, Text, Title } from '@mantine/core';
-import { IconFolder, IconRefresh } from '@tabler/icons-react';
+import { IconCopy, IconFolder, IconRefresh } from '@tabler/icons-react';
+import { notifications } from '@mantine/notifications';
 import { useQuery } from '@tanstack/react-query';
 import { getLogs } from '../lib/logsApi';
 import { openExternal } from '../lib/externalLinks';
@@ -17,14 +18,19 @@ export function LogsPage() {
     placeholderData: (previousData) => previousData
   });
 
+  async function copyLines(lines: string[]) {
+    await navigator.clipboard.writeText(lines.join('\n'));
+    notifications.show({ color: 'blue', title: 'Log copied', message: 'Visible log lines copied.' });
+  }
+
   return (
-    <Stack gap="sm">
-      <Card withBorder radius="sm">
+    <Stack gap="xs">
+      <Card withBorder radius="sm" p="sm">
         <Group justify="space-between">
           <div>
-            <Title order={4}>Logs</Title>
+            <Title order={5}>Logs</Title>
             <Text c="dimmed" size="xs">
-              Tail log targets utama untuk diagnosa cepat tanpa harus buka file manual.
+              Tail log utama untuk diagnosa cepat.
             </Text>
           </div>
           <Button size="xs" variant="light" leftSection={<IconRefresh size={14} />} onClick={() => void logsQuery.refetch()} loading={logsQuery.isFetching}>
@@ -38,9 +44,9 @@ export function LogsPage() {
           <Loader />
         </Group>
       ) : (
-        <Card withBorder radius="sm" style={{ minHeight: 'calc(100vh - 150px)' }}>
+        <Card withBorder radius="sm" p="sm" style={{ minHeight: 'calc(100vh - 144px)' }}>
           <Tabs defaultValue={logsQuery.data?.[0]?.key} keepMounted={false}>
-            <Tabs.List>
+            <Tabs.List grow>
               {(logsQuery.data ?? []).map((target) => (
                 <Tabs.Tab key={target.key} value={target.key}>
                   {target.label}
@@ -65,6 +71,15 @@ export function LogsPage() {
                       <Button
                         size="xs"
                         variant="light"
+                        leftSection={<IconCopy size={14} />}
+                        disabled={target.lines.length === 0}
+                        onClick={() => void copyLines(target.lines)}
+                      >
+                        Copy
+                      </Button>
+                      <Button
+                        size="xs"
+                        variant="light"
                         leftSection={<IconFolder size={14} />}
                         disabled={!target.available}
                         onClick={() => void openExternal(target.path)}
@@ -74,7 +89,7 @@ export function LogsPage() {
                     </Group>
                   </Group>
 
-                  <ScrollArea h="calc(100vh - 340px)" offsetScrollbars scrollbarSize={8} type="auto">
+                  <ScrollArea h="calc(100vh - 274px)" offsetScrollbars scrollbarSize={8} type="auto">
                     <Text
                       component="pre"
                       size="xs"
@@ -84,7 +99,7 @@ export function LogsPage() {
                         color: '#d7dae0',
                         padding: 12,
                         borderRadius: 6,
-                        minHeight: 'calc(100vh - 380px)',
+                        minHeight: 'calc(100vh - 314px)',
                         whiteSpace: 'pre-wrap'
                       }}
                     >

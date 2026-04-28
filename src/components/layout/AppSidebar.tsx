@@ -26,16 +26,27 @@ export function AppSidebar() {
   const setActivePage = useUiStore((state) => state.setActivePage);
 
   return (
-    <Stack gap="xs">
+    <Stack gap={4}>
       {items.map((item) => (
         <NavLink
           key={item.page}
           active={activePage === item.page}
           label={item.label}
           onClick={() => setActivePage(item.page)}
-          py={8}
+          py={6}
+          px={8}
+          styles={{
+            root: {
+              borderRadius: 6,
+              minHeight: 36
+            },
+            label: {
+              fontSize: 13,
+              fontWeight: activePage === item.page ? 700 : 500
+            }
+          }}
           leftSection={
-            <ThemeIcon variant="light" radius="sm" size={28}>
+            <ThemeIcon variant={activePage === item.page ? 'filled' : 'light'} radius="sm" size={24}>
               <item.icon size={16} />
             </ThemeIcon>
           }

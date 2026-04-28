@@ -54,7 +54,7 @@ export function DashboardPage() {
   const activePage = useUiStore((state) => state.activePage);
   const queryClient = useQueryClient();
   const [selectedVersions, setSelectedVersions] = useState<Record<string, string>>({});
-  const [viewMode, setViewMode] = useState<'list' | 'card'>('card');
+  const [viewMode, setViewMode] = useState<'list' | 'card'>('list');
 
   const servicesQuery = useQuery({
     queryKey: ['services'],
@@ -209,7 +209,7 @@ export function DashboardPage() {
     const selectedVersionBusy = versionMutation.isPending && versionMutation.variables?.key === service.key;
     if (!service.hasVersionDropdown) {
       return (
-        <Text size="xs" c="#6b7280" truncate="end">
+        <Text size="xs" c="#8b93a1" truncate="end">
           {service.launchTarget ? service.launchTarget : service.kind}
         </Text>
       );
@@ -274,7 +274,7 @@ export function DashboardPage() {
           <Button
             size={buttonSize}
             style={compactButtonStyle}
-            color="dark"
+            color="gray"
             variant="filled"
             disabled={service.status !== 'running'}
             loading={busy}
@@ -310,7 +310,7 @@ export function DashboardPage() {
           <Button
             size={buttonSize}
             style={compactButtonStyle}
-            color="dark"
+            color="gray"
             variant="filled"
             leftSection={<IconFolder size={14} />}
             disabled={!service.folderTarget}
@@ -343,16 +343,16 @@ export function DashboardPage() {
   }
 
   return (
-    <Stack gap="sm">
-      <Card withBorder radius="sm">
+    <Stack gap="xs">
+      <Card withBorder radius="sm" p="sm">
         <Group justify="space-between" align="center" wrap="nowrap">
           <div>
-            <Title order={4}>Services</Title>
+            <Title order={5}>Services</Title>
             <Text c="dimmed" size="xs">
               {running}/{controllableServices.length || 0} service aktif
             </Text>
           </div>
-          <Group gap="xs" justify="flex-end">
+          <Group gap={6} justify="flex-end" wrap="nowrap">
             <Button size="xs" variant="light" leftSection={<IconWorldWww size={14} />} onClick={() => void openExternal('http://localhost/')}>
               Localhost
             </Button>
@@ -377,7 +377,7 @@ export function DashboardPage() {
             >
               Mailpit
             </Button>
-            <Button size="xs" variant="light" onClick={() => void runBulkAction('start')} loading={mutation.isPending}>
+            <Button size="xs" variant="light" color="green" onClick={() => void runBulkAction('start')} loading={mutation.isPending}>
               Start All
             </Button>
             <SegmentedControl
@@ -394,16 +394,16 @@ export function DashboardPage() {
       </Card>
 
       {viewMode === 'list' ? (
-        <Card withBorder radius="sm" p={0}>
-          <ScrollArea type="auto" scrollbarSize={8}>
-            <Table verticalSpacing="xs" highlightOnHover style={{ minWidth: 920, tableLayout: 'fixed' }}>
+        <Card withBorder radius="sm" p={0} style={{ overflow: 'hidden' }}>
+          <ScrollArea type="auto" scrollbarSize={8} h="calc(100vh - 176px)">
+            <Table verticalSpacing={6} highlightOnHover style={{ minWidth: 900, tableLayout: 'fixed' }}>
               <colgroup>
                 <col style={{ width: 230 }} />
-                <col style={{ width: 110 }} />
-                <col style={{ width: 160 }} />
-                <col style={{ width: 70 }} />
-                <col style={{ width: 80 }} />
-                <col style={{ width: 270 }} />
+                <col style={{ width: 96 }} />
+                <col style={{ width: 190 }} />
+                <col style={{ width: 68 }} />
+                <col style={{ width: 76 }} />
+                <col style={{ width: 240 }} />
               </colgroup>
               <Table.Thead>
                 <Table.Tr>
@@ -412,7 +412,7 @@ export function DashboardPage() {
                   <Table.Th>Version</Table.Th>
                   <Table.Th>Port</Table.Th>
                   <Table.Th>PID</Table.Th>
-                    <Table.Th>Actions</Table.Th>
+                  <Table.Th>Actions</Table.Th>
                 </Table.Tr>
               </Table.Thead>
               <Table.Tbody>
@@ -424,13 +424,13 @@ export function DashboardPage() {
                           {serviceIcon(service.key)}
                         </Badge>
                         <div style={{ minWidth: 0 }}>
-                          <Text fw={700} size="sm" truncate="end">{service.label}</Text>
-                          <Text size="xs" c="dimmed" truncate="end">{service.detail}</Text>
+                          <Text fw={700} size="sm" truncate="end" lh={1.15}>{service.label}</Text>
+                          <Text size="xs" c="dimmed" truncate="end" lh={1.15}>{service.detail}</Text>
                         </div>
                       </Group>
                     </Table.Td>
                     <Table.Td>
-                      <Badge color={statusColor(service.status)} variant="light" radius="xl" miw={82} style={{ justifyContent: 'center' }}>
+                      <Badge color={statusColor(service.status)} variant="light" radius="xl" miw={76} size="xs" style={{ justifyContent: 'center' }}>
                         {service.status}
                       </Badge>
                     </Table.Td>
@@ -447,24 +447,24 @@ export function DashboardPage() {
           </ScrollArea>
         </Card>
       ) : (
-        <SimpleGrid cols={{ base: 1, sm: 2, lg: 3 }} spacing="sm" verticalSpacing="sm">
+        <SimpleGrid cols={{ base: 1, sm: 2 }} spacing="xs" verticalSpacing="xs">
         {cards.map((service) => {
           return (
             <Card
               key={service.key}
               withBorder
               radius="sm"
-              p="md"
+              p="sm"
               style={{
                 background: '#26282d',
                 borderColor: '#3a3d45',
                 color: '#f3f4f6',
-                minHeight: 190
+                minHeight: 176
               }}
             >
-              <Stack gap="md" h="100%" justify="space-between">
+              <Stack gap="sm" h="100%" justify="space-between">
                 <div>
-                  <Group justify="space-between" align="flex-start" mb="sm">
+                  <Group justify="space-between" align="flex-start" mb={6}>
                     <Group gap="xs">
                       <Badge variant="transparent" color="gray" p={0}>
                         {serviceIcon(service.key)}
@@ -473,15 +473,15 @@ export function DashboardPage() {
                         {service.label}
                       </Text>
                     </Group>
-                    <Badge color={statusColor(service.status)} variant="light" radius="xl">
+                    <Badge color={statusColor(service.status)} variant="light" radius="xl" size="xs">
                       {service.status}
                     </Badge>
                   </Group>
 
-                  <Title order={2} c="#f9fafb" style={{ lineHeight: 1.1 }}>
+                  <Title order={3} c="#f9fafb" lineClamp={1} style={{ lineHeight: 1.1 }}>
                     {service.selectedVersion || '-'}
                   </Title>
-                  <Text size="xs" c="#9ca3af" mt={6}>
+                  <Text size="xs" c="#9ca3af" mt={4} lineClamp={1}>
                     {service.detail}
                   </Text>
                   <Group gap="xs" mt="xs">

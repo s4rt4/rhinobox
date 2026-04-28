@@ -1,4 +1,4 @@
-import { Badge, Button, Card, Group, Loader, Stack, Text, Title } from '@mantine/core';
+import { Badge, Button, Card, Group, Loader, ScrollArea, Stack, Table, Text, Title } from '@mantine/core';
 import { IconCopy, IconFileCode, IconFolder, IconRefresh } from '@tabler/icons-react';
 import { notifications } from '@mantine/notifications';
 import { useQuery } from '@tanstack/react-query';
@@ -22,6 +22,14 @@ function sourceColor(source: DiscoveryItem['source']) {
 
 function isConfigKey(key: string) {
   return ['php_ini', 'mariadb_conf', 'postgresql_conf', 'postgresql_hba'].includes(key);
+}
+
+function itemGroup(key: string) {
+  if (key.includes('nginx') || key.includes('php') || key === 'web_root' || key === 'workspace') return 'Web';
+  if (key.includes('mariadb') || key.includes('postgresql')) return 'Database';
+  if (key.includes('node') || key.includes('redis') || key.includes('mailpit') || key.includes('pgweb') || key.includes('memcached')) return 'Tools';
+  if (key.includes('vhosts')) return 'Virtual host';
+  return 'Other';
 }
 
 function configTargetKey(key: string) {
@@ -73,13 +81,13 @@ export function DiscoveryPage() {
   }
 
   return (
-    <Stack gap="sm">
-      <Card withBorder radius="sm">
+    <Stack gap="xs">
+      <Card withBorder radius="sm" p="sm">
         <Group justify="space-between" align="center">
           <div>
-            <Title order={4}>Environment Paths</Title>
+            <Title order={5}>Environment Paths</Title>
             <Text c="dimmed" size="xs">
-              Halaman support/debug untuk melihat jalur aktif yang benar-benar dipakai RhinoBOX.
+              Jalur aktif yang sedang dipakai RhinoBOX.
             </Text>
           </div>
           <Button size="xs" variant="light" leftSection={<IconRefresh size={14} />} onClick={() => void discoveryQuery.refetch()} loading={discoveryQuery.isFetching}>
@@ -97,37 +105,50 @@ export function DiscoveryPage() {
           {discoveryQuery.error instanceof Error ? discoveryQuery.error.message : 'Failed to load discovery data.'}
         </Text>
       ) : (
-        <Stack gap="sm">
+        <Card withBorder radius="sm" p={0} style={{ overflow: 'hidden' }}>
+          <ScrollArea type="auto" scrollbarSize={8} h="calc(100vh - 160px)">
+            <Table verticalSpacing={7} highlightOnHover style={{ minWidth: 860, tableLayout: 'fixed' }}>
+              <colgroup>
+                <col style={{ width: 110 }} />
+                <col style={{ width: 190 }} />
+                <col style={{ width: 390 }} />
+                <col style={{ width: 150 }} />
+              </colgroup>
+              <Table.Thead>
+                <Table.Tr>
+                  <Table.Th>Group</Table.Th>
+                  <Table.Th>Target</Table.Th>
+                  <Table.Th>Path / Value</Table.Th>
+                  <Table.Th>Actions</Table.Th>
+                </Table.Tr>
+              </Table.Thead>
+              <Table.Tbody>
           {(discoveryQuery.data ?? []).map((item) => {
             const targetKey = configTargetKey(item.key);
             const canOpenFolder = !/^[\w.-]+:\d+$/.test(item.value);
             return (
-              <Card key={item.key} withBorder radius="sm">
-                <Stack gap="xs">
-                  <Group justify="space-between" align="flex-start" wrap="nowrap">
-                    <div style={{ flex: 1 }}>
-                      <Group gap="xs" mb={6}>
-                        <Text fw={700}>{item.label}</Text>
-                        <Badge variant="light" color={sourceColor(item.source)}>
-                          {item.source}
-                        </Badge>
-                        <Badge variant="light" color={item.available === false ? 'red' : 'green'}>
-                          {item.available === false ? 'missing' : 'available'}
-                        </Badge>
-                      </Group>
-                      <Text
-                        size="sm"
-                        ff="monospace"
-                        style={{
-                          whiteSpace: 'pre-wrap',
-                          overflowWrap: 'anywhere',
-                          wordBreak: 'break-word'
-                        }}
-                      >
-                        {item.value}
-                      </Text>
-                    </div>
-                    <Group gap="xs" wrap="nowrap" align="center">
+              <Table.Tr key={item.key}>
+                <Table.Td>
+                  <Badge variant="light" color="gray" size="xs">{itemGroup(item.key)}</Badge>
+                </Table.Td>
+                <Table.Td>
+                  <Stack gap={3}>
+                    <Text fw={700} size="sm" truncate="end">{item.label}</Text>
+                    <Group gap={4}>
+                      <Badge variant="light" size="xs" color={sourceColor(item.source)}>{item.source}</Badge>
+                      <Badge variant="light" size="xs" color={item.available === false ? 'red' : 'green'}>
+                        {item.available === false ? 'missing' : 'available'}
+                      </Badge>
+                    </Group>
+                  </Stack>
+                </Table.Td>
+                <Table.Td>
+                  <Text size="xs" ff="monospace" truncate="end" title={item.value}>
+                    {item.value}
+                  </Text>
+                </Table.Td>
+                <Table.Td>
+                    <Group gap={6} wrap="nowrap" align="center">
                       <Button
                         size="xs"
                         variant="light"
@@ -156,12 +177,14 @@ export function DiscoveryPage() {
                         </Button>
                       ) : null}
                     </Group>
-                  </Group>
-                </Stack>
-              </Card>
+                </Table.Td>
+              </Table.Tr>
             );
           })}
-        </Stack>
+              </Table.Tbody>
+            </Table>
+          </ScrollArea>
+        </Card>
       )}
     </Stack>
   );

@@ -75,7 +75,7 @@ export function App() {
 
   const contentMaxWidth =
     activePage === 'dashboard'
-      ? 780
+      ? 920
       : activePage === 'vhosts'
         ? 1100
       : activePage === 'discovery'
@@ -88,18 +88,18 @@ export function App() {
 
   return (
     <AppShell
-      padding="sm"
-      header={{ height: 60 }}
+      padding="xs"
+      header={{ height: 48 }}
       footer={{ height: 34 }}
-      navbar={{ width: 220, breakpoint: 'md' }}
+      navbar={{ width: 192, breakpoint: 'md' }}
       style={{ height: '100vh', overflow: 'hidden' }}
       styles={{
         main: {
-          height: 'calc(100vh - 94px)',
+          height: 'calc(100vh - 82px)',
           boxSizing: 'border-box',
           overflowY: 'auto',
           overflowX: 'hidden',
-          paddingBottom: 'calc(0.75rem + 34px)'
+          paddingBottom: 'calc(0.5rem + 34px)'
         }
       }}
     >
@@ -111,14 +111,14 @@ export function App() {
           onTerminate={terminateApp}
         />
       </AppShell.Header>
-      <AppShell.Navbar p="sm">
+      <AppShell.Navbar p={8}>
         <AppSidebar />
       </AppShell.Navbar>
       <AppShell.Footer>
         <AppFooter metrics={metricsQuery.data} loading={metricsQuery.isPending} />
       </AppShell.Footer>
       <AppShell.Main>
-        <Box maw={contentMaxWidth} pb="xl">
+        <Box maw={contentMaxWidth} pb="md">
           {page}
         </Box>
       </AppShell.Main>
