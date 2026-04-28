@@ -8,8 +8,17 @@ import { createVirtualHost, listVirtualHosts, removeVirtualHost } from '../lib/v
 import { useUiStore } from '../store/uiStore';
 
 function defaultRoot(name: string) {
-  const clean = name.trim().toLowerCase().replace(/[^a-z0-9-]/g, '-');
+  const clean = projectSlug(name);
   return clean ? `C:\\www\\${clean}` : 'C:\\www\\myapp';
+}
+
+function projectSlug(name: string) {
+  return name
+    .trim()
+    .toLowerCase()
+    .replace(/\.(test|local)$/i, '')
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/^-+|-+$/g, '');
 }
 
 export function VirtualHostsPage() {
@@ -21,7 +30,7 @@ export function VirtualHostsPage() {
 
   const root = customRoot.trim() || defaultRoot(name);
   const previewDomain = useMemo(() => {
-    const clean = name.trim().toLowerCase().replace(/\.(test|local)$/i, '');
+    const clean = projectSlug(name);
     return clean ? `${clean}.${tld}` : `myapp.${tld}`;
   }, [name, tld]);
 
@@ -91,6 +100,7 @@ export function VirtualHostsPage() {
               placeholder="myapp"
               value={name}
               onChange={(event) => setName(event.currentTarget.value)}
+              onBlur={() => setName((current) => projectSlug(current) || current)}
             />
             <Select
               size="xs"
@@ -113,7 +123,11 @@ export function VirtualHostsPage() {
               size="xs"
               leftSection={<IconPlus size={14} />}
               loading={createMutation.isPending}
-              onClick={() => createMutation.mutate({ name, tld, root })}
+              onClick={() => {
+                const cleanName = projectSlug(name);
+                createMutation.mutate({ name: cleanName, tld, root: customRoot.trim() || defaultRoot(cleanName) });
+              }}
+              disabled={!projectSlug(name)}
             >
               Create
             </Button>

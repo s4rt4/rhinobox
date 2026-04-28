@@ -31,6 +31,8 @@ function sanitize_vhost_name_php(string $name): string
 {
     $name = strtolower(trim($name));
     $name = preg_replace('/\.(test|local)$/', '', $name) ?? $name;
+    $name = preg_replace('/[^a-z0-9]+/', '-', $name) ?? $name;
+    $name = trim($name, '-');
     if (!preg_match('/^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$/', $name)) {
         json_response(['ok' => false, 'error' => 'Use a simple project name like myapp or client-site'], 400);
     }

@@ -659,6 +659,8 @@ fn sanitize_vhost_name(name: &str) -> Result<String, String> {
         .trim()
         .trim_end_matches(".test")
         .trim_end_matches(".local")
+        .replace(|ch: char| !ch.is_ascii_alphanumeric(), "-")
+        .trim_matches('-')
         .to_ascii_lowercase();
     if normalized.is_empty()
         || normalized.len() > 63

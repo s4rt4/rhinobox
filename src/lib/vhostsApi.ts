@@ -43,7 +43,11 @@ export async function listVirtualHosts(): Promise<VirtualHostSummary[]> {
 
 export async function createVirtualHost(payload: { name: string; tld: string; root: string }) {
   if (isTauriRuntime()) {
-    return invoke<string>('create_virtual_host', payload);
+    try {
+      return await invoke<string>('create_virtual_host', payload);
+    } catch (error) {
+      throw new Error(typeof error === 'string' ? error : error instanceof Error ? error.message : 'Virtual host command failed');
+    }
   }
 
   const response = await fetch('/api/vhosts.php', {
@@ -60,7 +64,11 @@ export async function createVirtualHost(payload: { name: string; tld: string; ro
 
 export async function removeVirtualHost(domain: string) {
   if (isTauriRuntime()) {
-    return invoke<string>('remove_virtual_host', { domain });
+    try {
+      return await invoke<string>('remove_virtual_host', { domain });
+    } catch (error) {
+      throw new Error(typeof error === 'string' ? error : error instanceof Error ? error.message : 'Virtual host command failed');
+    }
   }
 
   const response = await fetch('/api/vhosts.php', {
