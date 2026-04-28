@@ -2126,6 +2126,9 @@ async fn remove_virtual_host(domain: String) -> Result<String, String> {
 pub fn run() {
     tauri::Builder::default()
         .manage(AppLifecycleState::default())
+        .plugin(tauri_plugin_single_instance::init(|app, _args, _cwd| {
+            show_main_window(app);
+        }))
         .setup(|app| {
             let icon = Image::from_bytes(include_bytes!("../icons/icon.ico"))?;
 
