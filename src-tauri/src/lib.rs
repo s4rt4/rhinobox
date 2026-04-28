@@ -1,5 +1,7 @@
 use serde::{Deserialize, Serialize};
 use once_cell::sync::Lazy;
+#[cfg(windows)]
+use std::os::windows::process::CommandExt;
 use std::{
     collections::{HashMap, HashSet},
     fs,
@@ -20,6 +22,8 @@ use tauri::{
 };
 
 const SERVICE_SELECTION_FILE: &str = "C:\\www\\rhinobox\\service-selection.json";
+#[cfg(windows)]
+const CREATE_NO_WINDOW: u32 = 0x08000000;
 
 #[derive(Serialize, Deserialize, Clone)]
 #[serde(rename_all = "snake_case")]
@@ -162,8 +166,17 @@ fn show_main_window<R: tauri::Runtime, M: Manager<R>>(manager: &M) {
     }
 }
 
+fn new_background_command(program: &str) -> Command {
+    let mut command = Command::new(program);
+    #[cfg(windows)]
+    {
+        command.creation_flags(CREATE_NO_WINDOW);
+    }
+    command
+}
+
 fn powershell(script: &str) -> Result<String, String> {
-    let output = Command::new("powershell")
+    let output = new_background_command("powershell")
         .args(["-NoProfile", "-ExecutionPolicy", "Bypass", "-Command", script])
         .output()
         .map_err(|e| e.to_string())?;
@@ -176,7 +189,7 @@ fn powershell(script: &str) -> Result<String, String> {
 }
 
 fn command_output(program: &str, args: &[&str]) -> Result<String, String> {
-    let output = Command::new(program)
+    let output = new_background_command(program)
         .args(args)
         .output()
         .map_err(|e| e.to_string())?;
@@ -1262,8 +1275,8 @@ async fn control_service(
 
 #[tauri::command]
 fn open_external(url: String) -> Result<String, String> {
-    Command::new("cmd")
-        .args(["/C", "start", "", &url])
+    Command::new("explorer.exe")
+        .arg(&url)
         .spawn()
         .map_err(|e| e.to_string())?;
 
