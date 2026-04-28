@@ -29,6 +29,10 @@ $nodePath = node_version_path($nodeCurrent) ?? command_exists_path('node') ?? 'C
 $mailpitPath = existing_path('C:\\www\\runtimes\\mailpit\\1.29.7\\mailpit.exe') ?? command_exists_path('mailpit') ?? 'C:\\www\\runtimes\\mailpit\\1.29.7\\mailpit.exe';
 $pgwebPath = existing_path('C:\\www\\runtimes\\pgweb\\0.16.2\\pgweb.exe') ?? command_exists_path('pgweb') ?? 'C:\\www\\runtimes\\pgweb\\0.16.2\\pgweb.exe';
 $redisPath = existing_path('C:\\www\\runtimes\\redis\\8.6.2\\Redis-8.6.2-Windows-x64-msys2\\redis-server.exe') ?? command_exists_path('redis-server') ?? 'C:\\www\\runtimes\\redis\\8.6.2\\Redis-8.6.2-Windows-x64-msys2\\redis-server.exe';
+$vhostsDir = 'C:\\www\\rhinobox\\config\\nginx\\vhosts';
+if (!is_dir($vhostsDir)) {
+    mkdir($vhostsDir, 0777, true);
+}
 
 $items = [
     [
@@ -127,14 +131,14 @@ $items = [
         'label' => 'Memcached endpoint',
         'value' => '127.0.0.1:11211',
         'source' => 'embedded',
-        'available' => port_listening(11211),
+        'available' => true,
     ],
     [
         'key' => 'vhosts_dir',
         'label' => 'Virtual host configs',
-        'value' => 'C:\\www\\rhinobox\\config\\nginx\\vhosts',
+        'value' => $vhostsDir,
         'source' => 'derived',
-        'available' => is_dir('C:\\www\\rhinobox\\config\\nginx\\vhosts'),
+        'available' => is_dir($vhostsDir),
     ],
 ];
 

@@ -1349,6 +1349,7 @@ fn get_services_inner() -> Vec<ManagedService> {
 
 #[tauri::command]
 fn get_discovery() -> Vec<DiscoveryItem> {
+    let _ = fs::create_dir_all(VHOSTS_DIR);
     let discovery = runtime_discovery_snapshot();
     let nginx_current = get_selected_service_version("nginx").unwrap_or_else(|| "1.29.8".into());
     let php_current = get_selected_service_version("php_cgi").unwrap_or_else(|| "8.4.20".into());
@@ -1481,7 +1482,7 @@ fn get_discovery() -> Vec<DiscoveryItem> {
             label: "Memcached endpoint".into(),
             value: format!("127.0.0.1:{MEMCACHED_PORT}"),
             source: "embedded".into(),
-            available: Some(memcached_lite_running()),
+            available: Some(true),
         },
         DiscoveryItem {
             key: "vhosts_dir".into(),

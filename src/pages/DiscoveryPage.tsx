@@ -40,6 +40,10 @@ function configTargetKey(key: string) {
 }
 
 function folderTarget(value: string) {
+  if (/^[\w.-]+:\d+$/.test(value)) {
+    return value;
+  }
+
   const normalized = value.replace(/\//g, '\\');
   if (/\.([a-z0-9]+)$/i.test(normalized)) {
     const lastSlash = normalized.lastIndexOf('\\');
@@ -96,6 +100,7 @@ export function DiscoveryPage() {
         <Stack gap="sm">
           {(discoveryQuery.data ?? []).map((item) => {
             const targetKey = configTargetKey(item.key);
+            const canOpenFolder = !/^[\w.-]+:\d+$/.test(item.value);
             return (
               <Card key={item.key} withBorder radius="sm">
                 <Stack gap="xs">
@@ -127,6 +132,7 @@ export function DiscoveryPage() {
                         size="xs"
                         variant="light"
                         leftSection={<IconFolder size={14} />}
+                        disabled={!canOpenFolder}
                         onClick={() => void openExternal(folderTarget(item.value))}
                       >
                         Open folder
