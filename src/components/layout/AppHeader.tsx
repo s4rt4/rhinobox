@@ -1,5 +1,5 @@
 import { ActionIcon, Badge, Group, Text, Title } from '@mantine/core';
-import { IconRefresh } from '@tabler/icons-react';
+import { IconPower, IconRefresh } from '@tabler/icons-react';
 
 const logoUrl = new URL('../../../assets/branding/rhinobox.png', import.meta.url).href;
 
@@ -7,9 +7,10 @@ interface AppHeaderProps {
   summaryText: string;
   refreshing: boolean;
   onRefresh: () => void;
+  onTerminate: () => void;
 }
 
-export function AppHeader({ summaryText, refreshing, onRefresh }: AppHeaderProps) {
+export function AppHeader({ summaryText, refreshing, onRefresh, onTerminate }: AppHeaderProps) {
   return (
     <Group justify="space-between" h="100%" px="sm">
       <Group gap="sm" wrap="nowrap">
@@ -31,6 +32,9 @@ export function AppHeader({ summaryText, refreshing, onRefresh }: AppHeaderProps
         </Badge>
         <ActionIcon variant="light" size="md" aria-label="Refresh" onClick={onRefresh} loading={refreshing}>
           <IconRefresh size={16} />
+        </ActionIcon>
+        <ActionIcon variant="light" color="red" size="md" aria-label="Terminate RhinoBOX" onClick={onTerminate}>
+          <IconPower size={16} />
         </ActionIcon>
       </Group>
     </Group>

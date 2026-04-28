@@ -1,5 +1,5 @@
 export type ServiceStatus = 'running' | 'stopped' | 'unknown';
-export type AppPage = 'dashboard' | 'discovery' | 'config' | 'logs' | 'monitor' | 'about';
+export type AppPage = 'dashboard' | 'vhosts' | 'discovery' | 'config' | 'logs' | 'monitor' | 'about';
 
 export interface ManagedService {
   key: string;
@@ -25,7 +25,7 @@ export interface DiscoveryItem {
   key: string;
   label: string;
   value: string;
-  source: 'detected' | 'derived' | 'manual';
+  source: 'detected' | 'derived' | 'manual' | 'selected';
   available?: boolean;
 }
 
@@ -60,6 +60,16 @@ export interface ProcessMetric {
   kind: string;
   path?: string | null;
   canKill?: boolean;
+}
+
+export interface VirtualHostSummary {
+  name: string;
+  domain: string;
+  root: string;
+  tld: string;
+  configPath: string;
+  configExists: boolean;
+  hostsEnabled: boolean;
 }
 
 export interface SystemMetrics {

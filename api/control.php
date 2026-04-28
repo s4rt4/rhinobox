@@ -30,6 +30,18 @@ $commands = [
     'postgresql:start' => "Start-Service -Name 'postgresql-x64-17'; 'PostgreSQL started'",
     'postgresql:stop' => "Stop-Service -Name 'postgresql-x64-17' -Force; 'PostgreSQL stopped'",
     'postgresql:restart' => "Restart-Service -Name 'postgresql-x64-17' -Force; 'PostgreSQL restarted'",
+    'mailpit:start' => "Start-Process -FilePath 'C:\\www\\runtimes\\mailpit\\1.29.7\\mailpit.exe' -ArgumentList '--smtp', '127.0.0.1:1025', '--listen', '127.0.0.1:8025' -WorkingDirectory 'C:\\www\\runtimes\\mailpit\\1.29.7' -WindowStyle Hidden; 'Mailpit started'",
+    'mailpit:stop' => "Get-Process mailpit -ErrorAction SilentlyContinue | Stop-Process -Force; 'Mailpit stopped'",
+    'mailpit:restart' => "Get-Process mailpit -ErrorAction SilentlyContinue | Stop-Process -Force; Start-Sleep -Milliseconds 300; Start-Process -FilePath 'C:\\www\\runtimes\\mailpit\\1.29.7\\mailpit.exe' -ArgumentList '--smtp', '127.0.0.1:1025', '--listen', '127.0.0.1:8025' -WorkingDirectory 'C:\\www\\runtimes\\mailpit\\1.29.7' -WindowStyle Hidden; 'Mailpit restarted'",
+    'pgweb:start' => "Start-Process -FilePath 'C:\\www\\runtimes\\pgweb\\0.16.2\\pgweb.exe' -ArgumentList '/bind:127.0.0.1', '/listen:8081', '/host:127.0.0.1', '/port:5432', '/user:postgres', '/pass:postgres', '/db:postgres', '/ssl:disable', '/skip-open' -WorkingDirectory 'C:\\www\\runtimes\\pgweb\\0.16.2' -WindowStyle Hidden; 'Pgweb started'",
+    'pgweb:stop' => "Get-Process pgweb -ErrorAction SilentlyContinue | Stop-Process -Force; 'Pgweb stopped'",
+    'pgweb:restart' => "Get-Process pgweb -ErrorAction SilentlyContinue | Stop-Process -Force; Start-Sleep -Milliseconds 300; Start-Process -FilePath 'C:\\www\\runtimes\\pgweb\\0.16.2\\pgweb.exe' -ArgumentList '/bind:127.0.0.1', '/listen:8081', '/host:127.0.0.1', '/port:5432', '/user:postgres', '/pass:postgres', '/db:postgres', '/ssl:disable', '/skip-open' -WorkingDirectory 'C:\\www\\runtimes\\pgweb\\0.16.2' -WindowStyle Hidden; 'Pgweb restarted'",
+    'redis:start' => "Start-Process -FilePath 'C:\\www\\runtimes\\redis\\8.6.2\\Redis-8.6.2-Windows-x64-msys2\\redis-server.exe' -ArgumentList 'redis-rhinobox.conf' -WorkingDirectory 'C:\\www\\runtimes\\redis\\8.6.2\\Redis-8.6.2-Windows-x64-msys2' -WindowStyle Hidden; 'Redis started'",
+    'redis:stop' => "Get-Process redis-server -ErrorAction SilentlyContinue | Stop-Process -Force; 'Redis stopped'",
+    'redis:restart' => "Get-Process redis-server -ErrorAction SilentlyContinue | Stop-Process -Force; Start-Sleep -Milliseconds 300; Start-Process -FilePath 'C:\\www\\runtimes\\redis\\8.6.2\\Redis-8.6.2-Windows-x64-msys2\\redis-server.exe' -ArgumentList 'redis-rhinobox.conf' -WorkingDirectory 'C:\\www\\runtimes\\redis\\8.6.2\\Redis-8.6.2-Windows-x64-msys2' -WindowStyle Hidden; 'Redis restarted'",
+    'memcached:start' => "'Memcached Lite requires the RhinoBOX desktop runtime'",
+    'memcached:stop' => "'Memcached Lite requires the RhinoBOX desktop runtime'",
+    'memcached:restart' => "'Memcached Lite requires the RhinoBOX desktop runtime'",
 ];
 
 $commandKey = "{$key}:{$action}";

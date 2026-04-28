@@ -97,5 +97,20 @@ export async function setServiceVersion(key: string, version: string) {
     return invoke<string>('set_service_version', { key, version });
   }
 
-  return `Browser mode selected ${version} for ${key}`;
+  const response = await fetch('/api/service-version.php', {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      Accept: 'application/json'
+    },
+    body: JSON.stringify({ key, version })
+  });
+
+  const data = (await response.json()) as { ok: boolean; message?: string; error?: string };
+
+  if (!response.ok || !data.ok) {
+    throw new Error(data.error ?? `Browser API failed with ${response.status}`);
+  }
+
+  return data.message ?? `${key} version set to ${version}`;
 }

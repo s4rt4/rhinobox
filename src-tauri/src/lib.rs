@@ -5,12 +5,16 @@ use std::os::windows::process::CommandExt;
 use std::{
     collections::{HashMap, HashSet},
     fs,
+    io::{BufRead, BufReader, Read, Write},
+    net::{TcpListener, TcpStream},
     path::Path,
     process::Command,
     sync::{
         atomic::{AtomicBool, Ordering},
+        Arc,
         Mutex,
     },
+    thread,
     time::Instant,
 };
 use sysinfo::{Disks, Networks, System};
@@ -22,6 +26,17 @@ use tauri::{
 };
 
 const SERVICE_SELECTION_FILE: &str = "C:\\www\\rhinobox\\service-selection.json";
+const VHOSTS_FILE: &str = "C:\\www\\rhinobox\\virtual-hosts.json";
+const VHOSTS_DIR: &str = "C:\\www\\rhinobox\\config\\nginx\\vhosts";
+const MAILPIT_VERSION: &str = "1.29.7";
+const MAILPIT_EXE: &str = "C:\\www\\runtimes\\mailpit\\1.29.7\\mailpit.exe";
+const PGWEB_VERSION: &str = "0.16.2";
+const PGWEB_EXE: &str = "C:\\www\\runtimes\\pgweb\\0.16.2\\pgweb.exe";
+const REDIS_VERSION: &str = "8.6.2";
+const REDIS_EXE: &str = "C:\\www\\runtimes\\redis\\8.6.2\\Redis-8.6.2-Windows-x64-msys2\\redis-server.exe";
+const REDIS_CONF: &str = "redis-rhinobox.conf";
+const MEMCACHED_VERSION: &str = "lite";
+const MEMCACHED_PORT: u16 = 11211;
 #[cfg(windows)]
 const CREATE_NO_WINDOW: u32 = 0x08000000;
 
@@ -48,6 +63,25 @@ struct ManagedService {
     launch_target: Option<String>,
 }
 
+#[derive(Serialize, Deserialize, Clone, Default)]
+struct VirtualHostRecord {
+    name: String,
+    domain: String,
+    root: String,
+    tld: String,
+}
+
+#[derive(Serialize, Clone)]
+struct VirtualHostSummary {
+    name: String,
+    domain: String,
+    root: String,
+    tld: String,
+    config_path: String,
+    config_exists: bool,
+    hosts_enabled: bool,
+}
+
 #[derive(Serialize, Deserialize, Default)]
 struct ServiceSelectionState {
     nginx: Option<String>,
@@ -55,6 +89,10 @@ struct ServiceSelectionState {
     mariadb: Option<String>,
     postgresql: Option<String>,
     nodejs: Option<String>,
+    mailpit: Option<String>,
+    pgweb: Option<String>,
+    redis: Option<String>,
+    memcached: Option<String>,
 }
 
 #[derive(Serialize)]
@@ -146,12 +184,22 @@ struct RuntimeDiscoverySnapshot {
     postgresql_path: Option<String>,
     git_path: Option<String>,
     git_version: Option<String>,
+    mailpit_path: Option<String>,
+    pgweb_path: Option<String>,
+    redis_path: Option<String>,
 }
 
 static NETWORK_SNAPSHOT: Lazy<Mutex<Option<NetworkSnapshot>>> = Lazy::new(|| Mutex::new(None));
 static SERVICE_SNAPSHOT: Lazy<Mutex<Option<ServiceSnapshot>>> = Lazy::new(|| Mutex::new(None));
 static RUNTIME_DISCOVERY_SNAPSHOT: Lazy<Mutex<Option<RuntimeDiscoverySnapshot>>> =
     Lazy::new(|| Mutex::new(None));
+static MEMCACHED_LITE: Lazy<MemcachedLiteState> = Lazy::new(MemcachedLiteState::default);
+
+#[derive(Default)]
+struct MemcachedLiteState {
+    running: AtomicBool,
+    store: Arc<Mutex<HashMap<String, Vec<u8>>>>,
+}
 
 #[derive(Default)]
 struct AppLifecycleState {
@@ -264,6 +312,21 @@ fn runtime_discovery_snapshot() -> RuntimeDiscoverySnapshot {
             }
         }),
         git_version: command_version("git", &["--version"]),
+        mailpit_path: if Path::new(MAILPIT_EXE).exists() {
+            Some(MAILPIT_EXE.to_string())
+        } else {
+            command_exists_path("mailpit")
+        },
+        pgweb_path: if Path::new(PGWEB_EXE).exists() {
+            Some(PGWEB_EXE.to_string())
+        } else {
+            command_exists_path("pgweb")
+        },
+        redis_path: if Path::new(REDIS_EXE).exists() {
+            Some(REDIS_EXE.to_string())
+        } else {
+            command_exists_path("redis-server")
+        },
     };
 
     if let Ok(mut cached) = RUNTIME_DISCOVERY_SNAPSHOT.lock() {
@@ -279,6 +342,144 @@ fn installed_status(path: Option<&String>) -> ServiceStatus {
     } else {
         ServiceStatus::Stopped
     }
+}
+
+fn memcached_lite_running() -> bool {
+    MEMCACHED_LITE.running.load(Ordering::SeqCst)
+}
+
+fn handle_memcached_client(stream: TcpStream, store: Arc<Mutex<HashMap<String, Vec<u8>>>>) {
+    let reader_stream = match stream.try_clone() {
+        Ok(stream) => stream,
+        Err(_) => return,
+    };
+    let mut reader = BufReader::new(reader_stream);
+    let mut writer = stream;
+
+    loop {
+        let mut line = String::new();
+        match reader.read_line(&mut line) {
+            Ok(0) | Err(_) => break,
+            Ok(_) => {}
+        }
+
+        let trimmed = line.trim_end_matches(['\r', '\n']);
+        if trimmed.is_empty() {
+            continue;
+        }
+
+        let parts: Vec<&str> = trimmed.split_whitespace().collect();
+        match parts.first().map(|part| part.to_ascii_lowercase()).as_deref() {
+            Some("get") => {
+                for key in parts.iter().skip(1) {
+                    let value = store.lock().ok().and_then(|items| items.get(*key).cloned());
+                    if let Some(value) = value {
+                        let _ = write!(writer, "VALUE {} 0 {}\r\n", key, value.len());
+                        let _ = writer.write_all(&value);
+                        let _ = writer.write_all(b"\r\n");
+                    }
+                }
+                let _ = writer.write_all(b"END\r\n");
+            }
+            Some("set") => {
+                if parts.len() < 5 {
+                    let _ = writer.write_all(b"CLIENT_ERROR bad command line format\r\n");
+                    continue;
+                }
+
+                let key = parts[1].to_string();
+                let Ok(bytes) = parts[4].parse::<usize>() else {
+                    let _ = writer.write_all(b"CLIENT_ERROR bad data chunk\r\n");
+                    continue;
+                };
+
+                let mut value = vec![0_u8; bytes];
+                if reader.read_exact(&mut value).is_err() {
+                    break;
+                }
+                let mut crlf = [0_u8; 2];
+                let _ = reader.read_exact(&mut crlf);
+
+                if let Ok(mut items) = store.lock() {
+                    items.insert(key, value);
+                }
+                if !parts.iter().any(|part| part.eq_ignore_ascii_case("noreply")) {
+                    let _ = writer.write_all(b"STORED\r\n");
+                }
+            }
+            Some("delete") => {
+                if let Some(key) = parts.get(1) {
+                    let removed = store
+                        .lock()
+                        .map(|mut items| items.remove(*key).is_some())
+                        .unwrap_or(false);
+                    let _ = if removed {
+                        writer.write_all(b"DELETED\r\n")
+                    } else {
+                        writer.write_all(b"NOT_FOUND\r\n")
+                    };
+                } else {
+                    let _ = writer.write_all(b"CLIENT_ERROR bad command line format\r\n");
+                }
+            }
+            Some("flush_all") => {
+                if let Ok(mut items) = store.lock() {
+                    items.clear();
+                }
+                let _ = writer.write_all(b"OK\r\n");
+            }
+            Some("version") => {
+                let _ = writer.write_all(b"VERSION RhinoBOX Memcached Lite\r\n");
+            }
+            Some("quit") => break,
+            _ => {
+                let _ = writer.write_all(b"ERROR\r\n");
+            }
+        }
+    }
+}
+
+fn start_memcached_lite() -> Result<String, String> {
+    if memcached_lite_running() {
+        return Ok("Memcached Lite already running".into());
+    }
+
+    let listener = TcpListener::bind(("127.0.0.1", MEMCACHED_PORT))
+        .map_err(|e| format!("Memcached port {MEMCACHED_PORT} unavailable: {e}"))?;
+    listener
+        .set_nonblocking(false)
+        .map_err(|e| e.to_string())?;
+
+    MEMCACHED_LITE.running.store(true, Ordering::SeqCst);
+    let store = Arc::clone(&MEMCACHED_LITE.store);
+
+    thread::spawn(move || {
+        for stream in listener.incoming() {
+            if !MEMCACHED_LITE.running.load(Ordering::SeqCst) {
+                break;
+            }
+
+            if let Ok(stream) = stream {
+                let store = Arc::clone(&store);
+                thread::spawn(move || handle_memcached_client(stream, store));
+            }
+        }
+    });
+
+    Ok("Memcached Lite started".into())
+}
+
+fn stop_memcached_lite() -> Result<String, String> {
+    if !memcached_lite_running() {
+        return Ok("Memcached Lite stopped".into());
+    }
+
+    MEMCACHED_LITE.running.store(false, Ordering::SeqCst);
+    if let Ok(mut items) = MEMCACHED_LITE.store.lock() {
+        items.clear();
+    }
+    let _ = TcpStream::connect(("127.0.0.1", MEMCACHED_PORT));
+    Ok("Memcached Lite stopped".into())
 }
 
 fn parse_tasklist_row(line: &str) -> Option<(String, u32)> {
@@ -417,6 +618,10 @@ fn get_selected_service_version(key: &str) -> Option<String> {
         "mariadb" => state.mariadb,
         "postgresql" => state.postgresql,
         "nodejs" => state.nodejs,
+        "mailpit" => state.mailpit,
+        "pgweb" => state.pgweb,
+        "redis" => state.redis,
+        "memcached" => state.memcached,
         _ => None,
     }
 }
@@ -429,9 +634,281 @@ fn set_selected_service_version(key: &str, version: &str) -> Result<(), String> 
         "mariadb" => state.mariadb = Some(version.to_string()),
         "postgresql" => state.postgresql = Some(version.to_string()),
         "nodejs" => state.nodejs = Some(version.to_string()),
+        "mailpit" => state.mailpit = Some(version.to_string()),
+        "pgweb" => state.pgweb = Some(version.to_string()),
+        "redis" => state.redis = Some(version.to_string()),
+        "memcached" => state.memcached = Some(version.to_string()),
         _ => return Err("Unknown service key".into()),
     }
     write_service_selection_state(&state)
+}
+
+fn sanitize_vhost_name(name: &str) -> Result<String, String> {
+    let normalized = name
+        .trim()
+        .trim_end_matches(".test")
+        .trim_end_matches(".local")
+        .to_ascii_lowercase();
+    if normalized.is_empty()
+        || normalized.len() > 63
+        || !normalized
+            .chars()
+            .all(|ch| ch.is_ascii_lowercase() || ch.is_ascii_digit() || ch == '-')
+        || normalized.starts_with('-')
+        || normalized.ends_with('-')
+    {
+        return Err("Use a simple project name like myapp or client-site".into());
+    }
+    Ok(normalized)
+}
+
+fn sanitize_vhost_tld(tld: &str) -> Result<String, String> {
+    let normalized = tld.trim().trim_start_matches('.').to_ascii_lowercase();
+    match normalized.as_str() {
+        "test" | "local" => Ok(normalized),
+        _ => Err("Only .test and .local are supported".into()),
+    }
+}
+
+fn vhost_config_path(domain: &str) -> String {
+    format!("{VHOSTS_DIR}\\{domain}.conf")
+}
+
+fn read_virtual_host_records() -> Vec<VirtualHostRecord> {
+    fs::read_to_string(VHOSTS_FILE)
+        .ok()
+        .and_then(|content| serde_json::from_str::<Vec<VirtualHostRecord>>(&content).ok())
+        .unwrap_or_default()
+}
+
+fn write_virtual_host_records(records: &[VirtualHostRecord]) -> Result<(), String> {
+    if let Some(parent) = Path::new(VHOSTS_FILE).parent() {
+        fs::create_dir_all(parent).map_err(|e| e.to_string())?;
+    }
+    let content = serde_json::to_string_pretty(records).map_err(|e| e.to_string())?;
+    fs::write(VHOSTS_FILE, content).map_err(|e| e.to_string())
+}
+
+fn hosts_file_path() -> &'static str {
+    "C:\\Windows\\System32\\drivers\\etc\\hosts"
+}
+
+fn hosts_contains_domain(domain: &str) -> bool {
+    fs::read_to_string(hosts_file_path())
+        .map(|content| {
+            content
+                .lines()
+                .any(|line| !line.trim_start().starts_with('#') && line.split_whitespace().any(|part| part.eq_ignore_ascii_case(domain)))
+        })
+        .unwrap_or(false)
+}
+
+fn update_hosts_direct(domain: &str, add: bool) -> Result<(), String> {
+    let path = hosts_file_path();
+    let content = fs::read_to_string(path).map_err(|e| e.to_string())?;
+    let mut lines: Vec<String> = content
+        .lines()
+        .filter(|line| {
+            if add {
+                true
+            } else {
+                !(line.contains("# RhinoBOX") && line.split_whitespace().any(|part| part.eq_ignore_ascii_case(domain)))
+            }
+        })
+        .map(|line| line.to_string())
+        .collect();
+
+    if add && !hosts_contains_domain(domain) {
+        lines.push(format!("127.0.0.1 {domain} # RhinoBOX"));
+    }
+
+    let mut next = lines.join("\r\n");
+    next.push_str("\r\n");
+    fs::write(path, next).map_err(|e| e.to_string())
+}
+
+fn update_hosts_elevated(domain: &str, add: bool) -> Result<(), String> {
+    let safe_domain = domain.replace('\'', "''");
+    let script = if add {
+        format!(
+            "$hosts = '{path}'; $domain = '{safe_domain}'; $line = \"127.0.0.1 $domain # RhinoBOX\"; $content = Get-Content -LiteralPath $hosts -ErrorAction Stop; if (-not ($content -match \"\\s$([regex]::Escape($domain))(\\s|$)\")) {{ Add-Content -LiteralPath $hosts -Value $line }}",
+            path = hosts_file_path()
+        )
+    } else {
+        format!(
+            "$hosts = '{path}'; $domain = '{safe_domain}'; $content = Get-Content -LiteralPath $hosts -ErrorAction Stop; $next = $content | Where-Object {{ -not (($_ -like '*# RhinoBOX*') -and ($_ -match \"\\s$([regex]::Escape($domain))(\\s|$)\")) }}; Set-Content -LiteralPath $hosts -Value $next",
+            path = hosts_file_path()
+        )
+    };
+
+    let encoded = {
+        let mut bytes = Vec::new();
+        for unit in script.encode_utf16() {
+            bytes.extend(unit.to_le_bytes());
+        }
+        base64_encode(&bytes)
+    };
+
+    new_background_command("powershell")
+        .args([
+            "-NoProfile",
+            "-ExecutionPolicy",
+            "Bypass",
+            "-Command",
+            &format!("Start-Process powershell -Verb RunAs -ArgumentList '-NoProfile -ExecutionPolicy Bypass -EncodedCommand {encoded}'"),
+        ])
+        .spawn()
+        .map_err(|e| e.to_string())?;
+    Ok(())
+}
+
+fn update_hosts(domain: &str, add: bool) -> Result<String, String> {
+    match update_hosts_direct(domain, add) {
+        Ok(()) => Ok("hosts file updated".into()),
+        Err(_) => {
+            update_hosts_elevated(domain, add)?;
+            Ok("hosts update needs Windows admin approval".into())
+        }
+    }
+}
+
+fn base64_encode(bytes: &[u8]) -> String {
+    const TABLE: &[u8; 64] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+    let mut output = String::new();
+    let mut index = 0;
+    while index < bytes.len() {
+        let b0 = bytes[index];
+        let b1 = *bytes.get(index + 1).unwrap_or(&0);
+        let b2 = *bytes.get(index + 2).unwrap_or(&0);
+        output.push(TABLE[(b0 >> 2) as usize] as char);
+        output.push(TABLE[(((b0 & 0b0000_0011) << 4) | (b1 >> 4)) as usize] as char);
+        if index + 1 < bytes.len() {
+            output.push(TABLE[(((b1 & 0b0000_1111) << 2) | (b2 >> 6)) as usize] as char);
+        } else {
+            output.push('=');
+        }
+        if index + 2 < bytes.len() {
+            output.push(TABLE[(b2 & 0b0011_1111) as usize] as char);
+        } else {
+            output.push('=');
+        }
+        index += 3;
+    }
+    output
+}
+
+fn normalize_nginx_path(path: &str) -> String {
+    path.replace('\\', "/")
+}
+
+fn vhost_nginx_config(domain: &str, root: &str) -> String {
+    let root = normalize_nginx_path(root);
+    format!(
+        "server {{\n    listen 80;\n    server_name {domain};\n    root {root};\n    index index.php index.html index.htm;\n\n    location / {{\n        try_files $uri $uri/ /index.php?$query_string;\n    }}\n\n    location ~ \\.php$ {{\n        include fastcgi_params;\n        fastcgi_param SCRIPT_FILENAME $document_root$fastcgi_script_name;\n        fastcgi_pass 127.0.0.1:9000;\n    }}\n}}\n"
+    )
+}
+
+fn ensure_nginx_vhost_include() -> Result<(), String> {
+    fs::create_dir_all(VHOSTS_DIR).map_err(|e| e.to_string())?;
+    let include_line = "include C:/www/rhinobox/config/nginx/vhosts/*.conf;";
+
+    for version in installed_nginx_versions() {
+        let Some(root) = nginx_version_path(&version) else {
+            continue;
+        };
+        let config_path = format!("{root}\\conf\\nginx.conf");
+        let Ok(content) = fs::read_to_string(&config_path) else {
+            continue;
+        };
+        if content.contains(include_line) {
+            continue;
+        }
+
+        let insert = format!("    {include_line}\n");
+        let next = if let Some(index) = content.rfind("\n}") {
+            let (head, tail) = content.split_at(index + 1);
+            format!("{head}{insert}{tail}")
+        } else {
+            format!("{content}\n{insert}")
+        };
+        fs::write(&config_path, next).map_err(|e| e.to_string())?;
+    }
+
+    Ok(())
+}
+
+fn list_virtual_hosts_inner() -> Vec<VirtualHostSummary> {
+    read_virtual_host_records()
+        .into_iter()
+        .map(|record| {
+            let config_path = vhost_config_path(&record.domain);
+            VirtualHostSummary {
+                name: record.name,
+                domain: record.domain.clone(),
+                root: record.root,
+                tld: record.tld,
+                config_exists: Path::new(&config_path).exists(),
+                hosts_enabled: hosts_contains_domain(&record.domain),
+                config_path,
+            }
+        })
+        .collect()
+}
+
+fn create_virtual_host_inner(name: String, tld: String, root: String) -> Result<String, String> {
+    let name = sanitize_vhost_name(&name)?;
+    let tld = sanitize_vhost_tld(&tld)?;
+    let root = if root.trim().is_empty() {
+        format!("C:\\www\\{name}")
+    } else {
+        root.trim().to_string()
+    };
+    let domain = format!("{name}.{tld}");
+
+    fs::create_dir_all(&root).map_err(|e| e.to_string())?;
+    let index_path = format!("{root}\\index.php");
+    if !Path::new(&index_path).exists() {
+        fs::write(&index_path, format!("<?php\nphpinfo();\n// {domain}\n")).map_err(|e| e.to_string())?;
+    }
+
+    fs::create_dir_all(VHOSTS_DIR).map_err(|e| e.to_string())?;
+    fs::write(vhost_config_path(&domain), vhost_nginx_config(&domain, &root)).map_err(|e| e.to_string())?;
+    ensure_nginx_vhost_include()?;
+
+    let mut records = read_virtual_host_records();
+    records.retain(|record| record.domain != domain);
+    records.push(VirtualHostRecord {
+        name,
+        domain: domain.clone(),
+        root,
+        tld,
+    });
+    records.sort_by(|left, right| left.domain.cmp(&right.domain));
+    write_virtual_host_records(&records)?;
+
+    let hosts_message = update_hosts(&domain, true)?;
+    invalidate_service_snapshot();
+    Ok(format!("{domain} created; {hosts_message}; restart nginx to apply"))
+}
+
+fn remove_virtual_host_inner(domain: String) -> Result<String, String> {
+    let domain = domain.trim().to_ascii_lowercase();
+    if domain.is_empty() {
+        return Err("Domain is required".into());
+    }
+
+    let config_path = vhost_config_path(&domain);
+    if Path::new(&config_path).exists() {
+        fs::remove_file(&config_path).map_err(|e| e.to_string())?;
+    }
+
+    let mut records = read_virtual_host_records();
+    records.retain(|record| record.domain != domain);
+    write_virtual_host_records(&records)?;
+
+    let hosts_message = update_hosts(&domain, false)?;
+    invalidate_service_snapshot();
+    Ok(format!("{domain} removed; {hosts_message}; restart nginx to apply"))
 }
 
 fn node_version_candidates() -> Vec<String> {
@@ -561,6 +1038,10 @@ fn service_versions(key: &str) -> Vec<String> {
             .into_iter()
             .map(|(version, _)| version)
             .collect(),
+        "mailpit" => vec![MAILPIT_VERSION.into()],
+        "pgweb" => vec![PGWEB_VERSION.into()],
+        "redis" => vec![REDIS_VERSION.into()],
+        "memcached" => vec![MEMCACHED_VERSION.into()],
         _ => Vec::new(),
     }
 }
@@ -651,6 +1132,9 @@ fn get_services_inner() -> Vec<ManagedService> {
     let postgresql_service = postgresql_service_name();
     let postgresql_path = discovery.postgresql_path.clone();
     let git_path = discovery.git_path.clone();
+    let mailpit_path = discovery.mailpit_path.clone();
+    let pgweb_path = discovery.pgweb_path.clone();
+    let redis_path = discovery.redis_path.clone();
     let ports = listening_ports();
     let localhost_ready = ports.contains(&80);
     let phpmyadmin_ready = localhost_ready && ports.contains(&9000);
@@ -663,6 +1147,10 @@ fn get_services_inner() -> Vec<ManagedService> {
     let python_pid = processes.get("python.exe").copied();
     let go_pid = processes.get("go.exe").copied();
     let git_pid = processes.get("git.exe").copied();
+    let mailpit_pid = processes.get("mailpit.exe").copied();
+    let pgweb_pid = processes.get("pgweb.exe").copied();
+    let redis_pid = processes.get("redis-server.exe").copied();
+    let memcached_running = memcached_lite_running() || ports.contains(&MEMCACHED_PORT);
 
     let services = vec![
         ManagedService {
@@ -716,6 +1204,58 @@ fn get_services_inner() -> Vec<ManagedService> {
             current_version: postgresql_current,
             versions: postgresql_versions,
             launch_target: postgresql_path,
+        },
+        ManagedService {
+            key: "mailpit".into(),
+            label: "Mailpit".into(),
+            status: if mailpit_pid.is_some() { ServiceStatus::Running } else { ServiceStatus::Stopped },
+            detail: "Local SMTP catcher and mail inbox".into(),
+            port: if ports.contains(&8025) { Some(8025) } else { None },
+            pid: mailpit_pid,
+            can_reload: false,
+            kind: "process".into(),
+            current_version: Some(MAILPIT_VERSION.into()),
+            versions: vec![MAILPIT_VERSION.into()],
+            launch_target: mailpit_path,
+        },
+        ManagedService {
+            key: "pgweb".into(),
+            label: "Pgweb".into(),
+            status: if pgweb_pid.is_some() { ServiceStatus::Running } else { ServiceStatus::Stopped },
+            detail: "Lightweight PostgreSQL web client".into(),
+            port: if ports.contains(&8081) { Some(8081) } else { None },
+            pid: pgweb_pid,
+            can_reload: false,
+            kind: "process".into(),
+            current_version: Some(PGWEB_VERSION.into()),
+            versions: vec![PGWEB_VERSION.into()],
+            launch_target: pgweb_path,
+        },
+        ManagedService {
+            key: "redis".into(),
+            label: "Redis".into(),
+            status: if redis_pid.is_some() { ServiceStatus::Running } else { ServiceStatus::Stopped },
+            detail: "In-memory cache and queue backend".into(),
+            port: if ports.contains(&6379) { Some(6379) } else { None },
+            pid: redis_pid,
+            can_reload: false,
+            kind: "process".into(),
+            current_version: Some(REDIS_VERSION.into()),
+            versions: vec![REDIS_VERSION.into()],
+            launch_target: redis_path,
+        },
+        ManagedService {
+            key: "memcached".into(),
+            label: "Memcached".into(),
+            status: if memcached_running { ServiceStatus::Running } else { ServiceStatus::Stopped },
+            detail: "Embedded local memory cache for dev".into(),
+            port: if memcached_running { Some(MEMCACHED_PORT) } else { None },
+            pid: None,
+            can_reload: false,
+            kind: "process".into(),
+            current_version: Some(MEMCACHED_VERSION.into()),
+            versions: vec![MEMCACHED_VERSION.into()],
+            launch_target: Some(format!("127.0.0.1:{MEMCACHED_PORT}")),
         },
         ManagedService {
             key: "localhost".into(),
@@ -831,6 +1371,18 @@ fn get_discovery() -> Vec<DiscoveryItem> {
         })
         .or_else(|| discovery.node_version_paths.first().map(|(_, path)| path.clone()))
         .unwrap_or_else(|| "C:\\Program Files\\nodejs\\node.exe".into());
+    let mailpit_path = discovery
+        .mailpit_path
+        .clone()
+        .unwrap_or_else(|| MAILPIT_EXE.into());
+    let pgweb_path = discovery
+        .pgweb_path
+        .clone()
+        .unwrap_or_else(|| PGWEB_EXE.into());
+    let redis_path = discovery
+        .redis_path
+        .clone()
+        .unwrap_or_else(|| REDIS_EXE.into());
 
     vec![
         DiscoveryItem {
@@ -851,14 +1403,14 @@ fn get_discovery() -> Vec<DiscoveryItem> {
             key: "nginx_bin".into(),
             label: "Active nginx binary".into(),
             value: format!("{nginx_root}\\nginx.exe"),
-            source: "detected".into(),
+            source: "selected".into(),
             available: Some(Path::new(&format!("{nginx_root}\\nginx.exe")).exists()),
         },
         DiscoveryItem {
             key: "php_ini".into(),
             label: "Active PHP config".into(),
             value: format!("{php_root}\\php.ini"),
-            source: "detected".into(),
+            source: "selected".into(),
             available: Some(Path::new(&format!("{php_root}\\php.ini")).exists()),
         },
         DiscoveryItem {
@@ -900,8 +1452,43 @@ fn get_discovery() -> Vec<DiscoveryItem> {
             key: "nodejs_path".into(),
             label: "Active Node.js path".into(),
             value: node_path.clone(),
-            source: "detected".into(),
+            source: "selected".into(),
             available: Some(Path::new(&node_path).exists()),
+        },
+        DiscoveryItem {
+            key: "mailpit_bin".into(),
+            label: "Mailpit binary".into(),
+            value: mailpit_path.clone(),
+            source: "detected".into(),
+            available: Some(Path::new(&mailpit_path).exists()),
+        },
+        DiscoveryItem {
+            key: "pgweb_bin".into(),
+            label: "Pgweb binary".into(),
+            value: pgweb_path.clone(),
+            source: "detected".into(),
+            available: Some(Path::new(&pgweb_path).exists()),
+        },
+        DiscoveryItem {
+            key: "redis_bin".into(),
+            label: "Redis binary".into(),
+            value: redis_path.clone(),
+            source: "detected".into(),
+            available: Some(Path::new(&redis_path).exists()),
+        },
+        DiscoveryItem {
+            key: "memcached_lite".into(),
+            label: "Memcached endpoint".into(),
+            value: format!("127.0.0.1:{MEMCACHED_PORT}"),
+            source: "embedded".into(),
+            available: Some(memcached_lite_running()),
+        },
+        DiscoveryItem {
+            key: "vhosts_dir".into(),
+            label: "Virtual host configs".into(),
+            value: VHOSTS_DIR.into(),
+            source: "derived".into(),
+            available: Some(Path::new(VHOSTS_DIR).exists()),
         },
     ]
 }
@@ -1245,6 +1832,119 @@ fn control_service_inner(key: String, action: String, version: Option<String>) -
         ("postgresql", "start") => powershell("Start-Service -Name 'postgresql-x64-17'; 'PostgreSQL started'"),
         ("postgresql", "stop") => powershell("Stop-Service -Name 'postgresql-x64-17' -Force; 'PostgreSQL stopped'"),
         ("postgresql", "restart") => powershell("Restart-Service -Name 'postgresql-x64-17' -Force; 'PostgreSQL restarted'"),
+        ("mailpit", "start") => {
+            let exe = if Path::new(MAILPIT_EXE).exists() {
+                MAILPIT_EXE.to_string()
+            } else {
+                command_exists_path("mailpit").ok_or_else(|| "Mailpit binary not found".to_string())?
+            };
+            let root = Path::new(&exe)
+                .parent()
+                .map(|path| path.to_string_lossy().to_string())
+                .unwrap_or_else(|| "C:\\www".into());
+            let script = format!(
+                "Start-Process -FilePath '{exe}' -ArgumentList '--smtp', '127.0.0.1:1025', '--listen', '127.0.0.1:8025' -WorkingDirectory '{root}' -WindowStyle Hidden; 'Mailpit started'"
+            );
+            powershell(&script)
+        },
+        ("mailpit", "stop") => powershell("Get-Process mailpit -ErrorAction SilentlyContinue | Stop-Process -Force; 'Mailpit stopped'"),
+        ("mailpit", "restart") => {
+            let exe = if Path::new(MAILPIT_EXE).exists() {
+                MAILPIT_EXE.to_string()
+            } else {
+                command_exists_path("mailpit").ok_or_else(|| "Mailpit binary not found".to_string())?
+            };
+            let root = Path::new(&exe)
+                .parent()
+                .map(|path| path.to_string_lossy().to_string())
+                .unwrap_or_else(|| "C:\\www".into());
+            let script = format!(
+                "Get-Process mailpit -ErrorAction SilentlyContinue | Stop-Process -Force; Start-Sleep -Milliseconds 300; Start-Process -FilePath '{exe}' -ArgumentList '--smtp', '127.0.0.1:1025', '--listen', '127.0.0.1:8025' -WorkingDirectory '{root}' -WindowStyle Hidden; 'Mailpit restarted'"
+            );
+            powershell(&script)
+        },
+        ("pgweb", "start") => {
+            let exe = if Path::new(PGWEB_EXE).exists() {
+                PGWEB_EXE.to_string()
+            } else {
+                command_exists_path("pgweb").ok_or_else(|| "Pgweb binary not found".to_string())?
+            };
+            let root = Path::new(&exe)
+                .parent()
+                .map(|path| path.to_string_lossy().to_string())
+                .unwrap_or_else(|| "C:\\www".into());
+            let script = format!(
+                "Start-Process -FilePath '{exe}' -ArgumentList '/bind:127.0.0.1', '/listen:8081', '/host:127.0.0.1', '/port:5432', '/user:postgres', '/pass:postgres', '/db:postgres', '/ssl:disable', '/skip-open' -WorkingDirectory '{root}' -WindowStyle Hidden; 'Pgweb started'"
+            );
+            powershell(&script)
+        },
+        ("pgweb", "stop") => powershell("Get-Process pgweb -ErrorAction SilentlyContinue | Stop-Process -Force; 'Pgweb stopped'"),
+        ("pgweb", "restart") => {
+            let exe = if Path::new(PGWEB_EXE).exists() {
+                PGWEB_EXE.to_string()
+            } else {
+                command_exists_path("pgweb").ok_or_else(|| "Pgweb binary not found".to_string())?
+            };
+            let root = Path::new(&exe)
+                .parent()
+                .map(|path| path.to_string_lossy().to_string())
+                .unwrap_or_else(|| "C:\\www".into());
+            let script = format!(
+                "Get-Process pgweb -ErrorAction SilentlyContinue | Stop-Process -Force; Start-Sleep -Milliseconds 300; Start-Process -FilePath '{exe}' -ArgumentList '/bind:127.0.0.1', '/listen:8081', '/host:127.0.0.1', '/port:5432', '/user:postgres', '/pass:postgres', '/db:postgres', '/ssl:disable', '/skip-open' -WorkingDirectory '{root}' -WindowStyle Hidden; 'Pgweb restarted'"
+            );
+            powershell(&script)
+        },
+        ("redis", "start") => {
+            let exe = if Path::new(REDIS_EXE).exists() {
+                REDIS_EXE.to_string()
+            } else {
+                command_exists_path("redis-server").ok_or_else(|| "Redis binary not found".to_string())?
+            };
+            let root = Path::new(&exe)
+                .parent()
+                .map(|path| path.to_string_lossy().to_string())
+                .unwrap_or_else(|| "C:\\www".into());
+            let conf_path = format!("{root}\\{REDIS_CONF}");
+            let script = if Path::new(&conf_path).exists() {
+                format!(
+                    "Start-Process -FilePath '{exe}' -ArgumentList '{REDIS_CONF}' -WorkingDirectory '{root}' -WindowStyle Hidden; 'Redis started'"
+                )
+            } else {
+                format!(
+                    "Start-Process -FilePath '{exe}' -ArgumentList '--bind', '127.0.0.1', '--port', '6379', '--protected-mode', 'yes', '--appendonly', 'no' -WorkingDirectory '{root}' -WindowStyle Hidden; 'Redis started'"
+                )
+            };
+            powershell(&script)
+        },
+        ("redis", "stop") => powershell("Get-Process redis-server -ErrorAction SilentlyContinue | Stop-Process -Force; 'Redis stopped'"),
+        ("redis", "restart") => {
+            let exe = if Path::new(REDIS_EXE).exists() {
+                REDIS_EXE.to_string()
+            } else {
+                command_exists_path("redis-server").ok_or_else(|| "Redis binary not found".to_string())?
+            };
+            let root = Path::new(&exe)
+                .parent()
+                .map(|path| path.to_string_lossy().to_string())
+                .unwrap_or_else(|| "C:\\www".into());
+            let conf_path = format!("{root}\\{REDIS_CONF}");
+            let script = if Path::new(&conf_path).exists() {
+                format!(
+                    "Get-Process redis-server -ErrorAction SilentlyContinue | Stop-Process -Force; Start-Sleep -Milliseconds 300; Start-Process -FilePath '{exe}' -ArgumentList '{REDIS_CONF}' -WorkingDirectory '{root}' -WindowStyle Hidden; 'Redis restarted'"
+                )
+            } else {
+                format!(
+                    "Get-Process redis-server -ErrorAction SilentlyContinue | Stop-Process -Force; Start-Sleep -Milliseconds 300; Start-Process -FilePath '{exe}' -ArgumentList '--bind', '127.0.0.1', '--port', '6379', '--protected-mode', 'yes', '--appendonly', 'no' -WorkingDirectory '{root}' -WindowStyle Hidden; 'Redis restarted'"
+                )
+            };
+            powershell(&script)
+        },
+        ("memcached", "start") => start_memcached_lite(),
+        ("memcached", "stop") => stop_memcached_lite(),
+        ("memcached", "restart") => {
+            stop_memcached_lite()?;
+            start_memcached_lite()
+        },
         _ => Err("Unsupported service action".into()),
     };
 
@@ -1281,6 +1981,14 @@ fn open_external(url: String) -> Result<String, String> {
         .map_err(|e| e.to_string())?;
 
     Ok("Opened external link".into())
+}
+
+#[tauri::command]
+fn terminate_app(app: tauri::AppHandle) {
+    app.state::<AppLifecycleState>()
+        .allow_exit
+        .store(true, Ordering::SeqCst);
+    app.exit(0);
 }
 
 #[tauri::command]
@@ -1393,6 +2101,27 @@ async fn kill_process(pid: u32) -> Result<String, String> {
         .map_err(|e| e.to_string())?
 }
 
+#[tauri::command]
+async fn list_virtual_hosts() -> Result<Vec<VirtualHostSummary>, String> {
+    tauri::async_runtime::spawn_blocking(list_virtual_hosts_inner)
+        .await
+        .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+async fn create_virtual_host(name: String, tld: String, root: String) -> Result<String, String> {
+    tauri::async_runtime::spawn_blocking(move || create_virtual_host_inner(name, tld, root))
+        .await
+        .map_err(|e| e.to_string())?
+}
+
+#[tauri::command]
+async fn remove_virtual_host(domain: String) -> Result<String, String> {
+    tauri::async_runtime::spawn_blocking(move || remove_virtual_host_inner(domain))
+        .await
+        .map_err(|e| e.to_string())?
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
@@ -1467,10 +2196,14 @@ pub fn run() {
             get_system_metrics,
             set_service_version,
             control_service,
+            terminate_app,
             open_external,
             open_in_terminal,
             open_git_bash,
-            kill_process
+            kill_process,
+            list_virtual_hosts,
+            create_virtual_host,
+            remove_virtual_host
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

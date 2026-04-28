@@ -1,10 +1,12 @@
 import { AppShell, Box } from '@mantine/core';
+import { invoke } from '@tauri-apps/api/core';
 import { useDocumentVisibility } from '@mantine/hooks';
 import { useQuery } from '@tanstack/react-query';
 import { AppHeader } from './components/layout/AppHeader';
 import { AppFooter } from './components/layout/AppFooter';
 import { AppSidebar } from './components/layout/AppSidebar';
 import { DashboardPage } from './pages/DashboardPage';
+import { VirtualHostsPage } from './pages/VirtualHostsPage';
 import { DiscoveryPage } from './pages/DiscoveryPage';
 import { ConfigEditorPage } from './pages/ConfigEditorPage';
 import { LogsPage } from './pages/LogsPage';
@@ -38,8 +40,19 @@ export function App() {
   });
   const services = servicesQuery.data ?? [];
   const visibleServices = services.filter((item) => !['localhost', 'phpmyadmin'].includes(item.key));
-  const running = visibleServices.filter((item) => item.status === 'running').length;
-  const total = visibleServices.length;
+  const controllableServices = visibleServices.filter(
+    (item) => item.kind === 'process' || item.kind === 'windows-service'
+  );
+  const running = controllableServices.filter((item) => item.status === 'running').length;
+  const total = controllableServices.length;
+
+  function terminateApp() {
+    if (mode === 'tauri') {
+      void invoke('terminate_app');
+      return;
+    }
+    window.close();
+  }
 
   const page = (() => {
     switch (activePage) {
@@ -47,6 +60,8 @@ export function App() {
         return <DiscoveryPage />;
       case 'config':
         return <ConfigEditorPage />;
+      case 'vhosts':
+        return <VirtualHostsPage />;
       case 'logs':
         return <LogsPage />;
       case 'monitor':
@@ -61,6 +76,8 @@ export function App() {
   const contentMaxWidth =
     activePage === 'dashboard'
       ? 780
+      : activePage === 'vhosts'
+        ? 1100
       : activePage === 'discovery'
         ? 980
         : activePage === 'config'
@@ -91,6 +108,7 @@ export function App() {
           summaryText={`${running}/${total || 0} running`}
           refreshing={servicesQuery.isFetching}
           onRefresh={() => void servicesQuery.refetch()}
+          onTerminate={terminateApp}
         />
       </AppShell.Header>
       <AppShell.Navbar p="sm">

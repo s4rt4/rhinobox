@@ -2750,7 +2750,7 @@ dependencies = [
 
 [[package]]
 name = "rhinobox"
-version = "0.1.0-alpha.4"
+version = "0.1.0-beta.1"
 dependencies = [
  "once_cell",
  "serde",

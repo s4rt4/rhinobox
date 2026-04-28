@@ -13,6 +13,8 @@ function sourceColor(source: DiscoveryItem['source']) {
       return 'green';
     case 'manual':
       return 'yellow';
+    case 'selected':
+      return 'cyan';
     default:
       return 'blue';
   }

@@ -14,13 +14,15 @@ RhinoBOX currently focuses on:
 
 - `nginx` control
 - `PHP-CGI` control
-- `MariaDB` control
-- multi-version switching for `nginx` and `PHP`
-- quick launch actions for `localhost`
+- `MariaDB` and `PostgreSQL` control
+- `Mailpit`, `Pgweb`, `Redis`, and Memcached Lite service control
+- multi-version switching for `nginx`, `PHP`, and `Node.js`
+- quick launch actions for `localhost`, `phpMyAdmin`, `Mailpit`, and `Pgweb`
 - discovery of important local paths
 - config editing for environment files
-- log viewing
+- tabbed log viewing
 - process monitoring with kill action
+- virtual domains with `.test` / `.local` style local hostnames
 
 The app is designed first for real local Windows setups, including installs that come from mixed sources such as Winget, custom folders, and manual runtime drops.
 
@@ -51,9 +53,10 @@ assets/branding/     RhinoBOX logo assets
 ### Dashboard
 
 - service cards for local runtimes
+- optional compact service list view
 - start / stop / restart actions
 - version dropdowns for supported multi-version services
-- quick actions for `Localhost` and `phpMyAdmin`
+- quick actions for `Localhost`, `phpMyAdmin`, `Mailpit`, and `Pgweb`
 
 ### Discovery
 
@@ -62,8 +65,9 @@ assets/branding/     RhinoBOX logo assets
   - web root
   - `nginx.conf`
   - `php.ini`
-  - `phpMyAdmin`
-  - MariaDB service name
+  - database config/data paths
+  - helper binaries like `Mailpit`, `Pgweb`, and `Redis`
+  - virtual host config directory
 
 ### Config Editor
 
@@ -74,12 +78,26 @@ assets/branding/     RhinoBOX logo assets
 ### Logs
 
 - lightweight access to local service/app logs
+- tabbed layout for the logs RhinoBOX actually manages
 
 ### Process Monitor
 
 - lists Windows processes
 - search/filter support
 - process kill action
+
+### Virtual Domains
+
+- creates local `.test` or `.local` hostnames
+- writes nginx vhost files
+- updates Windows hosts entries when allowed
+
+### Cache and Mail Helpers
+
+- `Mailpit` local SMTP inbox on ports `1025` and `8025`
+- `Redis` local cache on port `6379`
+- embedded Memcached Lite endpoint on port `11211`
+- `Pgweb` lightweight PostgreSQL web client on port `8081`
 
 ## Requirements
 
@@ -92,6 +110,8 @@ Recommended for local Windows development machines with:
   - `nginx`
   - `PHP`
   - `MariaDB`
+  - `PostgreSQL`
+  - `Redis`
 
 ## Development
 
@@ -129,7 +149,7 @@ cargo check
 ## Notes
 
 - RhinoBOX is currently Windows-first.
-- Multi-version switching is implemented first around `nginx` and `PHP`.
+- Multi-version switching is implemented first around `nginx`, `PHP`, and `Node.js`.
 - Some local service detection depends on the actual install layout on the machine.
 
 ## Roadmap Direction
