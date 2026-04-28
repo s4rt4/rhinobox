@@ -18,6 +18,7 @@ RhinoBOX currently focuses on:
 - `Mailpit`, `Pgweb`, `Redis`, and Memcached Lite service control
 - multi-version switching for `nginx`, `PHP`, and `Node.js`
 - quick launch actions for `localhost`, `phpMyAdmin`, `Mailpit`, and `Pgweb`
+- project listing and quick actions from `C:\www`
 - discovery of important local paths
 - config editing for environment files
 - tabbed log viewing
@@ -57,6 +58,13 @@ assets/branding/     RhinoBOX logo assets
 - start / stop / restart actions
 - version dropdowns for supported multi-version services
 - quick actions for `Localhost`, `phpMyAdmin`, `Mailpit`, and `Pgweb`
+
+### Projects
+
+- scans local project folders in `C:\www`
+- detects common project types such as Laravel, WordPress, PHP, Node.js, Go, and Python
+- links projects to configured virtual domains when available
+- quick actions for browser, VS Code, terminal, and folder
 
 ### Discovery
 
