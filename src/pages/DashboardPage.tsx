@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
-import { Badge, Button, Card, Group, ScrollArea, SegmentedControl, Select, SimpleGrid, Stack, Table, Text, Title } from '@mantine/core';
+import { Badge, Button, Card, Group, SegmentedControl, Select, SimpleGrid, Stack, Text, Title } from '@mantine/core';
 import { IconBrandGit, IconDatabase, IconFolder, IconMail, IconTerminal2, IconTool, IconWorldWww } from '@tabler/icons-react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { notifications } from '@mantine/notifications';
@@ -395,56 +395,52 @@ export function DashboardPage() {
 
       {viewMode === 'list' ? (
         <Card withBorder radius="sm" p={0} style={{ overflow: 'hidden' }}>
-          <ScrollArea type="auto" scrollbarSize={8} h="calc(100vh - 176px)">
-            <Table verticalSpacing={6} highlightOnHover style={{ minWidth: 900, tableLayout: 'fixed' }}>
-              <colgroup>
-                <col style={{ width: 230 }} />
-                <col style={{ width: 96 }} />
-                <col style={{ width: 190 }} />
-                <col style={{ width: 68 }} />
-                <col style={{ width: 76 }} />
-                <col style={{ width: 240 }} />
-              </colgroup>
-              <Table.Thead>
-                <Table.Tr>
-                  <Table.Th>Service</Table.Th>
-                  <Table.Th>Status</Table.Th>
-                  <Table.Th>Version</Table.Th>
-                  <Table.Th>Port</Table.Th>
-                  <Table.Th>PID</Table.Th>
-                  <Table.Th>Actions</Table.Th>
-                </Table.Tr>
-              </Table.Thead>
-              <Table.Tbody>
-                {cards.map((service) => (
-                  <Table.Tr key={service.key}>
-                    <Table.Td>
-                      <Group gap="xs" wrap="nowrap">
-                        <Badge variant="transparent" color="gray" p={0} style={{ flex: '0 0 20px', width: 20, display: 'flex', justifyContent: 'center' }}>
-                          {serviceIcon(service.key)}
-                        </Badge>
-                        <div style={{ minWidth: 0 }}>
-                          <Text fw={700} size="sm" truncate="end" lh={1.15}>{service.label}</Text>
-                          <Text size="xs" c="dimmed" truncate="end" lh={1.15}>{service.detail}</Text>
-                        </div>
-                      </Group>
-                    </Table.Td>
-                    <Table.Td>
-                      <Badge color={statusColor(service.status)} variant="light" radius="xl" miw={76} size="xs" style={{ justifyContent: 'center' }}>
-                        {service.status}
+          <Stack gap={0}>
+            {cards.map((service, index) => (
+              <Stack
+                key={service.key}
+                gap={8}
+                p="xs"
+                style={{
+                  borderTop: index === 0 ? 'none' : '1px solid #3a3d45',
+                  background: index % 2 === 0 ? '#292b30' : '#25272c'
+                }}
+              >
+                <Group justify="space-between" align="flex-start" wrap="nowrap">
+                  <Group gap="xs" wrap="nowrap" style={{ minWidth: 0 }}>
+                    <Badge variant="transparent" color="gray" p={0} style={{ flex: '0 0 20px', width: 20, display: 'flex', justifyContent: 'center' }}>
+                      {serviceIcon(service.key)}
+                    </Badge>
+                    <div style={{ minWidth: 0 }}>
+                      <Text fw={700} size="sm" truncate="end" lh={1.15}>{service.label}</Text>
+                      <Text size="xs" c="dimmed" truncate="end" lh={1.15}>{service.detail}</Text>
+                    </div>
+                  </Group>
+                  <Group gap={6} wrap="nowrap">
+                    <Badge color={statusColor(service.status)} variant="light" radius="xl" miw={76} size="xs" style={{ justifyContent: 'center' }}>
+                      {service.status}
+                    </Badge>
+                    {service.port ? (
+                      <Badge variant="outline" color="blue" size="xs">
+                        :{service.port}
                       </Badge>
-                    </Table.Td>
-                    <Table.Td>
-                      {renderVersionSelect(service, 'xs')}
-                    </Table.Td>
-                    <Table.Td>{service.port ? `:${service.port}` : '-'}</Table.Td>
-                    <Table.Td>{service.pid ?? '-'}</Table.Td>
-                    <Table.Td>{renderServiceActions(service, true)}</Table.Td>
-                  </Table.Tr>
-                ))}
-              </Table.Tbody>
-            </Table>
-          </ScrollArea>
+                    ) : null}
+                  </Group>
+                </Group>
+                <Group justify="space-between" align="center" wrap="wrap" gap="xs">
+                  <div style={{ flex: '1 1 180px', minWidth: 140 }}>
+                    {renderVersionSelect(service, 'xs')}
+                  </div>
+                  <Text size="xs" c="dimmed" style={{ flex: '0 0 auto' }}>
+                    PID {service.pid ?? '-'}
+                  </Text>
+                  <div style={{ flex: '0 0 auto' }}>
+                    {renderServiceActions(service, true)}
+                  </div>
+                </Group>
+              </Stack>
+            ))}
+          </Stack>
         </Card>
       ) : (
         <SimpleGrid cols={{ base: 1, sm: 2 }} spacing="xs" verticalSpacing="xs">

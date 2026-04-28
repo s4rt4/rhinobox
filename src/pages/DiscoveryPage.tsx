@@ -1,4 +1,4 @@
-import { Badge, Button, Card, Group, Loader, ScrollArea, Stack, Table, Text, Title } from '@mantine/core';
+import { ActionIcon, Badge, Button, Card, Group, Loader, ScrollArea, Stack, Table, Text, Title, Tooltip } from '@mantine/core';
 import { IconCopy, IconFileCode, IconFolder, IconRefresh } from '@tabler/icons-react';
 import { notifications } from '@mantine/notifications';
 import { useQuery } from '@tanstack/react-query';
@@ -106,13 +106,13 @@ export function DiscoveryPage() {
         </Text>
       ) : (
         <Card withBorder radius="sm" p={0} style={{ overflow: 'hidden' }}>
-          <ScrollArea type="auto" scrollbarSize={8} h="calc(100vh - 160px)">
-            <Table verticalSpacing={7} highlightOnHover style={{ minWidth: 860, tableLayout: 'fixed' }}>
+          <ScrollArea type="auto" scrollbarSize={8}>
+            <Table verticalSpacing={7} highlightOnHover style={{ minWidth: 720, tableLayout: 'fixed' }}>
               <colgroup>
-                <col style={{ width: 110 }} />
-                <col style={{ width: 190 }} />
-                <col style={{ width: 390 }} />
-                <col style={{ width: 150 }} />
+                <col style={{ width: 96 }} />
+                <col style={{ width: 180 }} />
+                <col style={{ width: 332 }} />
+                <col style={{ width: 112 }} />
               </colgroup>
               <Table.Thead>
                 <Table.Tr>
@@ -149,32 +149,38 @@ export function DiscoveryPage() {
                 </Table.Td>
                 <Table.Td>
                     <Group gap={6} wrap="nowrap" align="center">
-                      <Button
-                        size="xs"
-                        variant="light"
-                        leftSection={<IconFolder size={14} />}
-                        disabled={!canOpenFolder}
-                        onClick={() => void openExternal(folderTarget(item.value))}
-                      >
-                        Open folder
-                      </Button>
-                      <Button
-                        size="xs"
-                        variant="light"
-                        leftSection={<IconCopy size={14} />}
-                        onClick={() => void copyPath(item.value)}
-                      >
-                        Copy path
-                      </Button>
-                      {isConfigKey(item.key) && targetKey ? (
-                        <Button
-                          size="xs"
+                      <Tooltip label="Open folder" withArrow>
+                        <ActionIcon
+                          size="lg"
                           variant="light"
-                          leftSection={<IconFileCode size={14} />}
+                          aria-label="Open folder"
+                          disabled={!canOpenFolder}
+                          onClick={() => void openExternal(folderTarget(item.value))}
+                        >
+                          <IconFolder size={16} />
+                        </ActionIcon>
+                      </Tooltip>
+                      <Tooltip label="Copy path" withArrow>
+                        <ActionIcon
+                          size="lg"
+                          variant="light"
+                          aria-label="Copy path"
+                          onClick={() => void copyPath(item.value)}
+                        >
+                          <IconCopy size={16} />
+                        </ActionIcon>
+                      </Tooltip>
+                      {isConfigKey(item.key) && targetKey ? (
+                        <Tooltip label="Open config" withArrow>
+                        <ActionIcon
+                          size="lg"
+                          variant="light"
+                          aria-label="Open config"
                           onClick={() => openConfigTarget(targetKey)}
                         >
-                          Open config
-                        </Button>
+                          <IconFileCode size={16} />
+                        </ActionIcon>
+                        </Tooltip>
                       ) : null}
                     </Group>
                 </Table.Td>
