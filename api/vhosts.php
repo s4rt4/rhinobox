@@ -119,6 +119,31 @@ function vhost_nginx_config_php(string $domain, string $root): string
         . "}\n";
 }
 
+function project_document_root_php(string $root): string
+{
+    $public = $root . '\\public';
+    return is_dir($public) ? $public : $root;
+}
+
+function reload_nginx_best_effort_php(): bool
+{
+    foreach (nginx_version_paths() as $root) {
+        $exe = $root . '\\nginx.exe';
+        if (!file_exists($exe)) {
+            continue;
+        }
+
+        $safeRoot = str_replace("'", "''", $root);
+        $safeExe = str_replace("'", "''", $exe);
+        $result = run_powershell("Set-Location '{$safeRoot}'; & '{$safeExe}' -p '{$safeRoot}\\' -s reload");
+        if (($result['code'] ?? 1) === 0) {
+            return true;
+        }
+    }
+
+    return false;
+}
+
 $requestMethod = $_SERVER['REQUEST_METHOD'] ?? 'GET';
 
 if ($requestMethod === 'GET') {
@@ -154,15 +179,23 @@ if ($requestMethod === 'POST') {
         mkdir($root, 0777, true);
     }
 
-    $index = $root . '\\index.php';
-    if (!file_exists($index)) {
+    $documentRoot = project_document_root_php($root);
+    if (!is_dir($documentRoot)) {
+        mkdir($documentRoot, 0777, true);
+    }
+
+    $hasIndex = file_exists($documentRoot . '\\index.php')
+        || file_exists($documentRoot . '\\index.html')
+        || file_exists($documentRoot . '\\index.htm');
+    if (!$hasIndex) {
+        $index = $documentRoot . '\\index.php';
         file_put_contents($index, "<?php\nphpinfo();\n// {$domain}\n");
     }
 
     if (!is_dir(VHOSTS_DIR)) {
         mkdir(VHOSTS_DIR, 0777, true);
     }
-    file_put_contents(vhost_config_path_php($domain), vhost_nginx_config_php($domain, $root));
+    file_put_contents(vhost_config_path_php($domain), vhost_nginx_config_php($domain, $documentRoot));
     ensure_nginx_vhost_include_php();
 
     $records = array_filter(vhost_records(), static fn(array $record): bool => ($record['domain'] ?? '') !== $domain);
@@ -178,7 +211,8 @@ if ($requestMethod === 'POST') {
             : 'hosts file updated';
     }
 
-    json_response(['ok' => true, 'message' => "{$domain} created; {$hostsMessage}; restart nginx to apply"]);
+    $reloadMessage = reload_nginx_best_effort_php() ? 'nginx reloaded' : 'restart nginx to apply';
+    json_response(['ok' => true, 'message' => "{$domain} created; {$hostsMessage}; {$reloadMessage}"]);
 }
 
 if ($requestMethod === 'DELETE') {
@@ -195,7 +229,8 @@ if ($requestMethod === 'DELETE') {
     $records = array_filter(vhost_records(), static fn(array $record): bool => ($record['domain'] ?? '') !== $domain);
     write_vhost_records($records);
 
-    json_response(['ok' => true, 'message' => "{$domain} removed; restart nginx to apply"]);
+    $reloadMessage = reload_nginx_best_effort_php() ? 'nginx reloaded' : 'restart nginx to apply';
+    json_response(['ok' => true, 'message' => "{$domain} removed; {$reloadMessage}"]);
 }
 
 json_response(['ok' => false, 'error' => 'Method not allowed'], 405);

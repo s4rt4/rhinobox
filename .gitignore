@@ -6,3 +6,5 @@ src-tauri/target/
 *.log
 
 service-selection.json
+virtual-hosts.json
+config/nginx/vhosts/

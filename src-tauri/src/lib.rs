@@ -896,6 +896,15 @@ fn normalize_nginx_path(path: &str) -> String {
     path.replace('\\', "/")
 }
 
+fn project_document_root(root: &str) -> String {
+    let public_root = Path::new(root).join("public");
+    if public_root.is_dir() {
+        public_root.to_string_lossy().to_string()
+    } else {
+        root.to_string()
+    }
+}
+
 fn vhost_nginx_config(domain: &str, root: &str) -> String {
     let root = normalize_nginx_path(root);
     format!(
@@ -932,6 +941,30 @@ fn ensure_nginx_vhost_include() -> Result<(), String> {
     Ok(())
 }
 
+fn reload_nginx_best_effort() -> bool {
+    let versions = get_selected_service_version("nginx")
+        .into_iter()
+        .chain(installed_nginx_versions())
+        .collect::<Vec<_>>();
+
+    for version in versions {
+        let Some(root) = nginx_version_path(&version) else {
+            continue;
+        };
+        if !Path::new(&root).exists() {
+            continue;
+        }
+
+        let exe = format!("{root}\\nginx.exe");
+        let script = format!("Set-Location '{root}'; & '{exe}' -p '{root}\\' -s reload");
+        if powershell(&script).is_ok() {
+            return true;
+        }
+    }
+
+    false
+}
+
 fn list_virtual_hosts_inner() -> Vec<VirtualHostSummary> {
     read_virtual_host_records()
         .into_iter()
@@ -961,13 +994,18 @@ fn create_virtual_host_inner(name: String, tld: String, root: String) -> Result<
     let domain = format!("{name}.{tld}");
 
     fs::create_dir_all(&root).map_err(|e| e.to_string())?;
-    let index_path = format!("{root}\\index.php");
-    if !Path::new(&index_path).exists() {
+    let document_root = project_document_root(&root);
+    fs::create_dir_all(&document_root).map_err(|e| e.to_string())?;
+    let has_index = ["index.php", "index.html", "index.htm"]
+        .iter()
+        .any(|file| Path::new(&document_root).join(file).exists());
+    if !has_index {
+        let index_path = format!("{document_root}\\index.php");
         fs::write(&index_path, format!("<?php\nphpinfo();\n// {domain}\n")).map_err(|e| e.to_string())?;
     }
 
     fs::create_dir_all(VHOSTS_DIR).map_err(|e| e.to_string())?;
-    fs::write(vhost_config_path(&domain), vhost_nginx_config(&domain, &root)).map_err(|e| e.to_string())?;
+    fs::write(vhost_config_path(&domain), vhost_nginx_config(&domain, &document_root)).map_err(|e| e.to_string())?;
     ensure_nginx_vhost_include()?;
 
     let mut records = read_virtual_host_records();
@@ -982,8 +1020,13 @@ fn create_virtual_host_inner(name: String, tld: String, root: String) -> Result<
     write_virtual_host_records(&records)?;
 
     let hosts_message = update_hosts(&domain, true)?;
+    let reload_message = if reload_nginx_best_effort() {
+        "nginx reloaded"
+    } else {
+        "restart nginx to apply"
+    };
     invalidate_service_snapshot();
-    Ok(format!("{domain} created; {hosts_message}; restart nginx to apply"))
+    Ok(format!("{domain} created; {hosts_message}; {reload_message}"))
 }
 
 fn remove_virtual_host_inner(domain: String) -> Result<String, String> {
@@ -1002,8 +1045,13 @@ fn remove_virtual_host_inner(domain: String) -> Result<String, String> {
     write_virtual_host_records(&records)?;
 
     let hosts_message = update_hosts(&domain, false)?;
+    let reload_message = if reload_nginx_best_effort() {
+        "nginx reloaded"
+    } else {
+        "restart nginx to apply"
+    };
     invalidate_service_snapshot();
-    Ok(format!("{domain} removed; {hosts_message}; restart nginx to apply"))
+    Ok(format!("{domain} removed; {hosts_message}; {reload_message}"))
 }
 
 fn node_version_candidates() -> Vec<String> {
