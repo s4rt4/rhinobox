@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { Badge, Button, Card, Group, Loader, ScrollArea, Stack, Tabs, Text, TextInput, Title } from '@mantine/core';
 import { IconCopy, IconFileText, IconFolder, IconRefresh, IconSearch } from '@tabler/icons-react';
 import { notifications } from '@mantine/notifications';
@@ -12,6 +12,7 @@ export function LogsPage() {
   const activePage = useUiStore((state) => state.activePage);
   const globalSearch = useUiStore((state) => state.globalSearch);
   const [localSearch, setLocalSearch] = useState('');
+  const [activeTab, setActiveTab] = useState<string | null>(null);
   const logsQuery = useQuery({
     queryKey: ['logs'],
     queryFn: getLogs,
@@ -33,6 +34,17 @@ export function LogsPage() {
       }))
       .filter((target) => `${target.label} ${target.path}`.toLowerCase().includes(term) || target.lines.length > 0);
   }, [logsQuery.data, term]);
+
+  useEffect(() => {
+    if (filteredTargets.length === 0) {
+      setActiveTab(null);
+      return;
+    }
+
+    if (!activeTab || !filteredTargets.some((target) => target.key === activeTab)) {
+      setActiveTab(filteredTargets[0].key);
+    }
+  }, [activeTab, filteredTargets]);
 
   async function copyLines(lines: string[]) {
     await navigator.clipboard.writeText(lines.join('\n'));
@@ -81,7 +93,7 @@ export function LogsPage() {
         />
       ) : (
         <Card withBorder radius="sm" p="sm" className="surface-muted">
-          <Tabs defaultValue={filteredTargets[0]?.key} keepMounted={false}>
+          <Tabs value={activeTab} onChange={setActiveTab} keepMounted={false}>
             <Tabs.List grow>
               {filteredTargets.map((target) => (
                 <Tabs.Tab
