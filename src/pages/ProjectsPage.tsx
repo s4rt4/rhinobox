@@ -1,11 +1,13 @@
 import { useMemo, useState } from 'react';
 import { ActionIcon, Badge, Button, Card, Group, Loader, Select, Stack, Table, Text, TextInput, Title, Tooltip } from '@mantine/core';
 import { notifications } from '@mantine/notifications';
-import { IconBrandVisualStudio, IconExternalLink, IconFolder, IconRefresh, IconSearch, IconTerminal2, IconWorldWww } from '@tabler/icons-react';
-import { useQuery } from '@tanstack/react-query';
+import { IconBrandVisualStudio, IconExternalLink, IconFolder, IconLinkPlus, IconRefresh, IconSearch, IconTerminal2, IconWorldWww } from '@tabler/icons-react';
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { listProjects } from '../lib/projectsApi';
+import { createVirtualHost } from '../lib/vhostsApi';
 import { openExternal, openInCode, openInTerminal } from '../lib/externalLinks';
 import { useUiStore } from '../store/uiStore';
+import type { ProjectSummary } from '../types';
 
 function projectColor(kind: string) {
   switch (kind.toLowerCase()) {
@@ -24,9 +26,19 @@ function projectColor(kind: string) {
   }
 }
 
+function projectSlug(name: string) {
+  return name
+    .trim()
+    .toLowerCase()
+    .replace(/\.(test|local)$/i, '')
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/^-+|-+$/g, '');
+}
+
 export function ProjectsPage() {
   const activePage = useUiStore((state) => state.activePage);
   const globalSearch = useUiStore((state) => state.globalSearch);
+  const queryClient = useQueryClient();
   const [search, setSearch] = useState('');
   const [kind, setKind] = useState<string | null>(null);
 
@@ -37,6 +49,26 @@ export function ProjectsPage() {
     refetchOnWindowFocus: false,
     staleTime: 30000,
     placeholderData: (previousData) => previousData
+  });
+
+  const createDomainMutation = useMutation({
+    mutationFn: (project: ProjectSummary) => createVirtualHost({
+      name: projectSlug(project.name),
+      tld: 'test',
+      root: project.path
+    }),
+    onSuccess: (message) => {
+      notifications.show({ color: 'green', title: 'Virtual domain ready', message });
+      void queryClient.invalidateQueries({ queryKey: ['projects'] });
+      void queryClient.invalidateQueries({ queryKey: ['virtual-hosts'] });
+    },
+    onError: (error) => {
+      notifications.show({
+        color: 'red',
+        title: 'Virtual domain failed',
+        message: error instanceof Error ? error.message : 'Unknown error'
+      });
+    }
   });
 
   const projects = projectsQuery.data ?? [];
@@ -120,7 +152,7 @@ export function ProjectsPage() {
               <col style={{ width: 230 }} />
               <col />
               <col style={{ width: 170 }} />
-              <col style={{ width: 178 }} />
+              <col style={{ width: 222 }} />
             </colgroup>
             <Table.Thead>
               <Table.Tr>
@@ -167,6 +199,19 @@ export function ProjectsPage() {
                       <Tooltip label="Open in browser" withArrow>
                         <ActionIcon size="lg" variant="light" aria-label="Open in browser" onClick={() => void runAction(() => openExternal(project.url), 'Open browser')}>
                           <IconExternalLink size={16} />
+                        </ActionIcon>
+                      </Tooltip>
+                      <Tooltip label={project.hasVhost ? 'Virtual domain already exists' : `Add ${projectSlug(project.name)}.test`} withArrow>
+                        <ActionIcon
+                          size="lg"
+                          variant="light"
+                          color="green"
+                          aria-label="Add virtual domain"
+                          disabled={project.hasVhost || !projectSlug(project.name)}
+                          loading={createDomainMutation.isPending && createDomainMutation.variables?.path === project.path}
+                          onClick={() => createDomainMutation.mutate(project)}
+                        >
+                          <IconLinkPlus size={16} />
                         </ActionIcon>
                       </Tooltip>
                       <Tooltip label="Open in VS Code" withArrow>
