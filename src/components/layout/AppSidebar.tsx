@@ -1,4 +1,4 @@
-import { NavLink, Stack, ThemeIcon } from '@mantine/core';
+import { NavLink, Stack, Text, ThemeIcon } from '@mantine/core';
 import {
   IconInfoCircle,
   IconFileCode,
@@ -28,7 +28,10 @@ export function AppSidebar() {
   const setActivePage = useUiStore((state) => state.setActivePage);
 
   return (
-    <Stack gap={4}>
+    <Stack gap={6}>
+      <Text size="10px" fw={800} tt="uppercase" c="dimmed" px={8} mt={2}>
+        Workspace
+      </Text>
       {items.map((item) => (
         <NavLink
           key={item.page}
@@ -40,10 +43,10 @@ export function AppSidebar() {
           styles={{
             root: {
               borderRadius: 6,
-              minHeight: 36
+              minHeight: 34
             },
             label: {
-              fontSize: 13,
+              fontSize: 12,
               fontWeight: activePage === item.page ? 700 : 500
             }
           }}

@@ -1,11 +1,13 @@
-import { ActionIcon, Badge, Button, Card, Group, Loader, ScrollArea, Stack, Table, Text, Title, Tooltip } from '@mantine/core';
-import { IconCopy, IconFileCode, IconFolder, IconRefresh } from '@tabler/icons-react';
+import { Badge, Button, Card, Group, Loader, Stack, Text, Title } from '@mantine/core';
+import { IconCopy, IconFileCode, IconFolder, IconMapSearch, IconRefresh } from '@tabler/icons-react';
 import { notifications } from '@mantine/notifications';
 import { useQuery } from '@tanstack/react-query';
 import { getDiscovery } from '../lib/discoveryApi';
 import { openExternal } from '../lib/externalLinks';
 import { useUiStore } from '../store/uiStore';
 import type { DiscoveryItem } from '../types';
+import { EmptyState } from '../components/common/EmptyState';
+import { TooltipAction } from '../components/common/TooltipAction';
 
 function sourceColor(source: DiscoveryItem['source']) {
   switch (source) {
@@ -62,6 +64,7 @@ function folderTarget(value: string) {
 
 export function DiscoveryPage() {
   const activePage = useUiStore((state) => state.activePage);
+  const globalSearch = useUiStore((state) => state.globalSearch);
   const openConfigTarget = useUiStore((state) => state.openConfigTarget);
   const discoveryQuery = useQuery({
     queryKey: ['discovery'],
@@ -69,6 +72,12 @@ export function DiscoveryPage() {
     enabled: activePage === 'discovery',
     refetchOnWindowFocus: false,
     staleTime: 30000
+  });
+
+  const filtered = (discoveryQuery.data ?? []).filter((item) => {
+    const term = globalSearch.trim().toLowerCase();
+    if (!term) return true;
+    return `${itemGroup(item.key)} ${item.label} ${item.value} ${item.source}`.toLowerCase().includes(term);
   });
 
   async function copyPath(value: string) {
@@ -82,16 +91,16 @@ export function DiscoveryPage() {
 
   return (
     <Stack gap="xs">
-      <Card withBorder radius="sm" p="sm">
-        <Group justify="space-between" align="center">
+      <Card withBorder radius="sm" p="sm" className="surface-muted">
+        <Group justify="space-between" align="center" wrap="nowrap">
           <div>
             <Title order={5}>Environment Paths</Title>
             <Text c="dimmed" size="xs">
-              Jalur aktif yang sedang dipakai RhinoBOX.
+              Jalur aktif yang sedang dipakai RhinoBOX{globalSearch.trim() ? ` - ${filtered.length} matched` : ''}.
             </Text>
           </div>
           <Button size="xs" variant="light" leftSection={<IconRefresh size={14} />} onClick={() => void discoveryQuery.refetch()} loading={discoveryQuery.isFetching}>
-            Refresh paths
+            Refresh
           </Button>
         </Group>
       </Card>
@@ -101,95 +110,64 @@ export function DiscoveryPage() {
           <Loader />
         </Group>
       ) : discoveryQuery.isError ? (
-        <Text c="red" size="sm">
-          {discoveryQuery.error instanceof Error ? discoveryQuery.error.message : 'Failed to load discovery data.'}
-        </Text>
+        <EmptyState
+          icon={<IconMapSearch size={28} color="#ff8787" />}
+          title="Environment scan failed"
+          message={discoveryQuery.error instanceof Error ? discoveryQuery.error.message : 'Failed to load discovery data.'}
+        />
+      ) : filtered.length === 0 ? (
+        <EmptyState
+          icon={<IconMapSearch size={28} color="#8b93a1" />}
+          title="No paths matched"
+          message="Coba kosongkan search atau refresh daftar environment path."
+        />
       ) : (
-        <Card withBorder radius="sm" p={0} style={{ overflow: 'hidden' }}>
-          <ScrollArea type="auto" scrollbarSize={5}>
-            <Table verticalSpacing={7} highlightOnHover style={{ minWidth: 720, tableLayout: 'fixed' }}>
-              <colgroup>
-                <col style={{ width: 96 }} />
-                <col style={{ width: 180 }} />
-                <col style={{ width: 332 }} />
-                <col style={{ width: 112 }} />
-              </colgroup>
-              <Table.Thead>
-                <Table.Tr>
-                  <Table.Th>Group</Table.Th>
-                  <Table.Th>Target</Table.Th>
-                  <Table.Th>Path / Value</Table.Th>
-                  <Table.Th>Actions</Table.Th>
-                </Table.Tr>
-              </Table.Thead>
-              <Table.Tbody>
-          {(discoveryQuery.data ?? []).map((item) => {
+        <Card withBorder radius="sm" p={0} className="surface-muted" style={{ overflow: 'hidden' }}>
+          {filtered.map((item) => {
             const targetKey = configTargetKey(item.key);
             const canOpenFolder = !/^[\w.-]+:\d+$/.test(item.value);
             return (
-              <Table.Tr key={item.key}>
-                <Table.Td>
-                  <Badge variant="light" color="gray" size="xs">{itemGroup(item.key)}</Badge>
-                </Table.Td>
-                <Table.Td>
-                  <Stack gap={3}>
-                    <Text fw={700} size="sm" truncate="end">{item.label}</Text>
-                    <Group gap={4}>
-                      <Badge variant="light" size="xs" color={sourceColor(item.source)}>{item.source}</Badge>
-                      <Badge variant="light" size="xs" color={item.available === false ? 'red' : 'green'}>
-                        {item.available === false ? 'missing' : 'available'}
-                      </Badge>
-                    </Group>
-                  </Stack>
-                </Table.Td>
-                <Table.Td>
-                  <Text size="xs" ff="monospace" truncate="end" title={item.value}>
+              <div className="path-row" key={item.key}>
+                <Stack gap={4} style={{ minWidth: 0 }}>
+                  <Group gap={5} wrap="nowrap">
+                    <Badge variant="light" color="gray" size="xs">{itemGroup(item.key)}</Badge>
+                    <Badge variant="light" size="xs" color={sourceColor(item.source)}>{item.source}</Badge>
+                  </Group>
+                  <Text fw={700} size="sm" truncate="end">{item.label}</Text>
+                </Stack>
+
+                <Stack gap={4} style={{ minWidth: 0 }}>
+                  <Text className="mono-truncate" size="xs" title={item.value}>
                     {item.value}
                   </Text>
-                </Table.Td>
-                <Table.Td>
-                    <Group gap={6} wrap="nowrap" align="center">
-                      <Tooltip label="Open folder" withArrow>
-                        <ActionIcon
-                          size="lg"
-                          variant="light"
-                          aria-label="Open folder"
-                          disabled={!canOpenFolder}
-                          onClick={() => void openExternal(folderTarget(item.value))}
-                        >
-                          <IconFolder size={16} />
-                        </ActionIcon>
-                      </Tooltip>
-                      <Tooltip label="Copy path" withArrow>
-                        <ActionIcon
-                          size="lg"
-                          variant="light"
-                          aria-label="Copy path"
-                          onClick={() => void copyPath(item.value)}
-                        >
-                          <IconCopy size={16} />
-                        </ActionIcon>
-                      </Tooltip>
-                      {isConfigKey(item.key) && targetKey ? (
-                        <Tooltip label="Open config" withArrow>
-                        <ActionIcon
-                          size="lg"
-                          variant="light"
-                          aria-label="Open config"
-                          onClick={() => openConfigTarget(targetKey)}
-                        >
-                          <IconFileCode size={16} />
-                        </ActionIcon>
-                        </Tooltip>
-                      ) : null}
-                    </Group>
-                </Table.Td>
-              </Table.Tr>
+                  <Badge variant="light" size="xs" color={item.available === false ? 'red' : 'green'} w="fit-content">
+                    {item.available === false ? 'missing' : 'available'}
+                  </Badge>
+                </Stack>
+
+                <Group gap={6} wrap="nowrap" justify="flex-end">
+                  <TooltipAction
+                    label="Open folder"
+                    icon={<IconFolder size={16} />}
+                    disabled={!canOpenFolder}
+                    onClick={() => void openExternal(folderTarget(item.value))}
+                  />
+                  <TooltipAction
+                    label="Copy path"
+                    icon={<IconCopy size={16} />}
+                    onClick={() => void copyPath(item.value)}
+                  />
+                  {isConfigKey(item.key) && targetKey ? (
+                    <TooltipAction
+                      label="Open config"
+                      icon={<IconFileCode size={16} />}
+                      onClick={() => openConfigTarget(targetKey)}
+                    />
+                  ) : null}
+                </Group>
+              </div>
             );
           })}
-              </Table.Tbody>
-            </Table>
-          </ScrollArea>
         </Card>
       )}
     </Stack>

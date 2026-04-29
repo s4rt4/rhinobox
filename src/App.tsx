@@ -21,6 +21,8 @@ import { useUiStore } from './store/uiStore';
 export function App() {
   const mode = runtimeMode();
   const activePage = useUiStore((state) => state.activePage);
+  const globalSearch = useUiStore((state) => state.globalSearch);
+  const setGlobalSearch = useUiStore((state) => state.setGlobalSearch);
   const documentVisibility = useDocumentVisibility();
   const isVisible = documentVisibility === 'visible';
   const servicesQuery = useQuery({
@@ -96,7 +98,7 @@ export function App() {
       padding="xs"
       header={{ height: 48 }}
       footer={{ height: 34 }}
-      navbar={{ width: 192, breakpoint: 'md' }}
+      navbar={{ width: 184, breakpoint: 'md' }}
       style={{ height: '100vh', overflow: 'hidden' }}
       styles={{
         main: {
@@ -104,7 +106,7 @@ export function App() {
           boxSizing: 'border-box',
           overflowY: 'auto',
           overflowX: 'hidden',
-          paddingBottom: 'calc(0.5rem + 34px)'
+          paddingBottom: 8
         }
       }}
     >
@@ -112,6 +114,8 @@ export function App() {
         <AppHeader
           summaryText={`${running}/${total || 0} running`}
           refreshing={servicesQuery.isFetching}
+          search={globalSearch}
+          onSearchChange={setGlobalSearch}
           onRefresh={() => void servicesQuery.refetch()}
           onTerminate={terminateApp}
         />
@@ -123,7 +127,7 @@ export function App() {
         <AppFooter metrics={metricsQuery.data} loading={metricsQuery.isPending} />
       </AppShell.Footer>
       <AppShell.Main>
-        <Box maw={contentMaxWidth} pb="md">
+        <Box maw={contentMaxWidth} className="app-page">
           {page}
         </Box>
       </AppShell.Main>

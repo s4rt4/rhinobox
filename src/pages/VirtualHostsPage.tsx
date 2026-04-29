@@ -23,6 +23,7 @@ function projectSlug(name: string) {
 
 export function VirtualHostsPage() {
   const activePage = useUiStore((state) => state.activePage);
+  const globalSearch = useUiStore((state) => state.globalSearch);
   const queryClient = useQueryClient();
   const [name, setName] = useState('');
   const [tld, setTld] = useState('test');
@@ -41,6 +42,11 @@ export function VirtualHostsPage() {
     refetchOnWindowFocus: false,
     staleTime: 30000,
     placeholderData: (previousData) => previousData
+  });
+  const filteredHosts = (vhostsQuery.data ?? []).filter((item) => {
+    const term = globalSearch.trim().toLowerCase();
+    if (!term) return true;
+    return `${item.domain} ${item.root} ${item.configPath}`.toLowerCase().includes(term);
   });
 
   const createMutation = useMutation({
@@ -76,13 +82,13 @@ export function VirtualHostsPage() {
   });
 
   return (
-    <Stack gap="sm">
-      <Card withBorder radius="sm">
+    <Stack gap="xs">
+      <Card withBorder radius="sm" p="sm" className="surface-muted">
         <Group justify="space-between" align="center">
           <div>
-            <Title order={4}>Virtual Domains</Title>
+            <Title order={5}>Virtual Domains</Title>
             <Text c="dimmed" size="xs">
-              Buat domain lokal `.test` atau `.local` untuk project di `C:\www`.
+              Buat domain lokal `.test` atau `.local` untuk project di `C:\www`{globalSearch.trim() ? ` - ${filteredHosts.length} matched` : ''}.
             </Text>
           </div>
           <Button size="xs" variant="light" leftSection={<IconRefresh size={14} />} onClick={() => void vhostsQuery.refetch()} loading={vhostsQuery.isFetching}>
@@ -91,7 +97,7 @@ export function VirtualHostsPage() {
         </Group>
       </Card>
 
-      <Card withBorder radius="sm">
+      <Card withBorder radius="sm" p="sm" className="surface-muted">
         <Stack gap="sm">
           <Group grow align="flex-end">
             <TextInput
@@ -138,7 +144,7 @@ export function VirtualHostsPage() {
         </Stack>
       </Card>
 
-      <Card withBorder radius="sm">
+      <Card withBorder radius="sm" p="sm" className="surface-muted">
         {vhostsQuery.isLoading ? (
           <Group justify="center" py="xl">
             <Loader />
@@ -154,14 +160,14 @@ export function VirtualHostsPage() {
               </Table.Tr>
             </Table.Thead>
             <Table.Tbody>
-              {(vhostsQuery.data ?? []).length === 0 ? (
+              {filteredHosts.length === 0 ? (
                 <Table.Tr>
                   <Table.Td colSpan={4}>
-                    <Text c="dimmed" size="sm">Belum ada virtual domain.</Text>
+                    <Text c="dimmed" size="sm">Belum ada virtual domain yang cocok.</Text>
                   </Table.Td>
                 </Table.Tr>
               ) : (
-                (vhostsQuery.data ?? []).map((item) => (
+                filteredHosts.map((item) => (
                   <Table.Tr key={item.domain}>
                     <Table.Td>
                       <Text fw={700}>{item.domain}</Text>

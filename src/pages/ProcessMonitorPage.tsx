@@ -9,6 +9,7 @@ import type { ProcessMetric } from '../types';
 
 export function ProcessMonitorPage() {
   const activePage = useUiStore((state) => state.activePage);
+  const globalSearch = useUiStore((state) => state.globalSearch);
   const queryClient = useQueryClient();
   const [search, setSearch] = useState('');
   const [mode, setMode] = useState<'light' | 'detailed'>('light');
@@ -42,7 +43,7 @@ export function ProcessMonitorPage() {
 
   const filtered = useMemo(() => {
     const items = monitorQuery.data ?? [];
-    const term = search.trim().toLowerCase();
+    const term = `${globalSearch} ${search}`.trim().toLowerCase();
     if (!term) return items;
     return items.filter((item) => {
       const haystacks = [item.label, item.pid?.toString() ?? '', item.port?.toString() ?? ''];
@@ -51,14 +52,14 @@ export function ProcessMonitorPage() {
       }
       return haystacks.some((value) => value.toLowerCase().includes(term));
     });
-  }, [isDetailed, monitorQuery.data, search]);
+  }, [globalSearch, isDetailed, monitorQuery.data, search]);
 
   return (
-    <Card withBorder radius="sm">
+    <Card withBorder radius="sm" className="surface-muted">
       <Stack gap="sm">
         <Group justify="space-between" align="flex-end">
           <div>
-            <Title order={4}>Process Monitor</Title>
+            <Title order={5}>Process Monitor</Title>
             <Text c="dimmed" size="xs">
               Semua proses Windows yang sedang jalan, lengkap dengan aksi kill.
             </Text>

@@ -1,12 +1,13 @@
 import { useEffect, useMemo, useState } from 'react';
-import { Badge, Button, Card, Group, SegmentedControl, Select, SimpleGrid, Stack, Text, Title } from '@mantine/core';
-import { IconBrandGit, IconDatabase, IconFolder, IconMail, IconTerminal2, IconTool, IconWorldWww } from '@tabler/icons-react';
+import { Badge, Button, Card, Group, SegmentedControl, Select, SimpleGrid, Stack, Text, Title, Tooltip } from '@mantine/core';
+import { IconBrandGit, IconDatabase, IconFolder, IconMail, IconServerOff, IconTerminal2, IconTool, IconWorldWww } from '@tabler/icons-react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { notifications } from '@mantine/notifications';
 import { controlService, getServices, setServiceVersion } from '../lib/servicesApi';
 import { openExternal, openGitBash, openInTerminal } from '../lib/externalLinks';
 import { useUiStore } from '../store/uiStore';
 import type { ManagedService } from '../types';
+import { EmptyState } from '../components/common/EmptyState';
 
 function statusColor(status: ManagedService['status']) {
   if (status === 'running') return 'green';
@@ -52,6 +53,7 @@ function parentFolder(path: string | null | undefined) {
 
 export function DashboardPage() {
   const activePage = useUiStore((state) => state.activePage);
+  const globalSearch = useUiStore((state) => state.globalSearch);
   const queryClient = useQueryClient();
   const [selectedVersions, setSelectedVersions] = useState<Record<string, string>>({});
   const [viewMode, setViewMode] = useState<'list' | 'card'>('list');
@@ -122,7 +124,23 @@ export function DashboardPage() {
   }, [visibleServices]);
 
   const cards = useMemo(() => {
-    return visibleServices.map((service) => {
+    const term = globalSearch.trim().toLowerCase();
+    return visibleServices
+      .filter((service) => {
+        if (!term) return true;
+        return [
+          service.label,
+          service.detail,
+          service.key,
+          service.currentVersion ?? '',
+          service.launchTarget ?? '',
+          service.port?.toString() ?? ''
+        ]
+          .join(' ')
+          .toLowerCase()
+          .includes(term);
+      })
+      .map((service) => {
       const selectedVersion = selectedVersions[service.key] ?? service.currentVersion ?? service.versions?.[0] ?? '';
       const hasVersionDropdown = (service.versions?.length ?? 0) > 0;
       const canControl = service.kind === 'process' || service.kind === 'windows-service';
@@ -141,7 +159,7 @@ export function DashboardPage() {
         folderTarget
       };
     });
-  }, [selectedVersions, visibleServices]);
+  }, [globalSearch, selectedVersions, visibleServices]);
 
   async function runBulkAction(action: 'start' | 'stop' | 'restart') {
     const candidates = controllableServices;
@@ -216,6 +234,7 @@ export function DashboardPage() {
     }
 
     return (
+      <Tooltip label={service.versions?.join(', ') ?? ''} disabled={(service.versions?.length ?? 0) < 2} withArrow openDelay={450}>
       <Select
         size={size}
         value={service.selectedVersion}
@@ -245,13 +264,14 @@ export function DashboardPage() {
           }
         }}
       />
+      </Tooltip>
     );
   }
 
   function renderServiceActions(service: (typeof cards)[number], compact = false) {
     const busy = mutation.isPending && mutation.variables?.key === service.key;
     const buttonSize = compact ? 'xs' : 'sm';
-    const compactButtonStyle = compact ? { width: 78 } : undefined;
+    const compactButtonStyle = compact ? { width: 86 } : undefined;
     if (service.canControl) {
       return (
         <Group grow={!compact} gap="xs" wrap="nowrap">
@@ -344,12 +364,13 @@ export function DashboardPage() {
 
   return (
     <Stack gap="xs">
-      <Card withBorder radius="sm" p="sm">
+      <Card withBorder radius="sm" p="sm" className="surface-muted">
         <Group justify="space-between" align="center" wrap="nowrap">
           <div>
             <Title order={5}>Services</Title>
             <Text c="dimmed" size="xs">
-              {running}/{controllableServices.length || 0} service aktif
+              {running}/{controllableServices.length || 0} running
+              {globalSearch.trim() ? ` - ${cards.length} matched` : ''}
             </Text>
           </div>
           <Group gap={6} justify="flex-end" wrap="nowrap">
@@ -393,54 +414,50 @@ export function DashboardPage() {
         </Group>
       </Card>
 
-      {viewMode === 'list' ? (
-        <Card withBorder radius="sm" p={0} style={{ overflow: 'hidden' }}>
-          <Stack gap={0}>
-            {cards.map((service, index) => (
-              <Stack
-                key={service.key}
-                gap={8}
-                p="xs"
-                style={{
-                  borderTop: index === 0 ? 'none' : '1px solid #3a3d45',
-                  background: index % 2 === 0 ? '#292b30' : '#25272c'
-                }}
-              >
-                <Group justify="space-between" align="flex-start" wrap="nowrap">
-                  <Group gap="xs" wrap="nowrap" style={{ minWidth: 0 }}>
-                    <Badge variant="transparent" color="gray" p={0} style={{ flex: '0 0 20px', width: 20, display: 'flex', justifyContent: 'center' }}>
-                      {serviceIcon(service.key)}
-                    </Badge>
-                    <div style={{ minWidth: 0 }}>
-                      <Text fw={700} size="sm" truncate="end" lh={1.15}>{service.label}</Text>
-                      <Text size="xs" c="dimmed" truncate="end" lh={1.15}>{service.detail}</Text>
-                    </div>
-                  </Group>
-                  <Group gap={6} wrap="nowrap">
-                    <Badge color={statusColor(service.status)} variant="light" radius="xl" miw={76} size="xs" style={{ justifyContent: 'center' }}>
-                      {service.status}
-                    </Badge>
-                    {service.port ? (
-                      <Badge variant="outline" color="blue" size="xs">
-                        :{service.port}
-                      </Badge>
-                    ) : null}
-                  </Group>
-                </Group>
-                <Group justify="space-between" align="center" wrap="wrap" gap="xs">
-                  <div style={{ flex: '1 1 180px', minWidth: 140 }}>
-                    {renderVersionSelect(service, 'xs')}
-                  </div>
-                  <Text size="xs" c="dimmed" style={{ flex: '0 0 auto' }}>
-                    PID {service.pid ?? '-'}
-                  </Text>
-                  <div style={{ flex: '0 0 auto' }}>
-                    {renderServiceActions(service, true)}
-                  </div>
-                </Group>
-              </Stack>
-            ))}
-          </Stack>
+      {cards.length === 0 ? (
+        <EmptyState
+          icon={<IconServerOff size={28} color="#8b93a1" />}
+          title="No services matched"
+          message="Coba kosongkan search atau refresh status service."
+        />
+      ) : viewMode === 'list' ? (
+        <Card withBorder radius="sm" p={0} style={{ overflow: 'hidden' }} className="surface-muted">
+          <div className="service-list-row service-list-head">
+            <Text size="xs">Service</Text>
+            <Text size="xs">Status</Text>
+            <Text size="xs">Version / Path</Text>
+            <Text size="xs">Port</Text>
+            <Text size="xs">PID</Text>
+            <Text size="xs" ta="right">Actions</Text>
+          </div>
+          {cards.map((service) => (
+            <div key={service.key} className="service-list-row">
+              <Group gap="xs" wrap="nowrap" style={{ minWidth: 0 }}>
+                <Badge variant="transparent" color="gray" p={0} style={{ flex: '0 0 20px', width: 20, display: 'flex', justifyContent: 'center' }}>
+                  {serviceIcon(service.key)}
+                </Badge>
+                <div style={{ minWidth: 0 }}>
+                  <Text fw={700} size="sm" truncate="end" lh={1.15}>{service.label}</Text>
+                  <Text size="xs" c="dimmed" truncate="end" lh={1.15}>{service.detail}</Text>
+                </div>
+              </Group>
+              <Badge color={statusColor(service.status)} variant="light" radius="xl" size="xs" className="status-pill">
+                {service.status}
+              </Badge>
+              <div style={{ minWidth: 0 }}>
+                {renderVersionSelect(service, 'xs')}
+              </div>
+              <Text size="xs" c={service.port ? undefined : 'dimmed'} ff="monospace">
+                {service.port ? `:${service.port}` : '-'}
+              </Text>
+              <Text size="xs" c={service.pid ? undefined : 'dimmed'} ff="monospace">
+                {service.pid ?? '-'}
+              </Text>
+              <Group justify="flex-end" wrap="nowrap">
+                {renderServiceActions(service, true)}
+              </Group>
+            </div>
+          ))}
         </Card>
       ) : (
         <SimpleGrid cols={{ base: 1, sm: 2 }} spacing="xs" verticalSpacing="xs">
@@ -451,12 +468,7 @@ export function DashboardPage() {
               withBorder
               radius="sm"
               p="sm"
-              style={{
-                background: '#26282d',
-                borderColor: '#3a3d45',
-                color: '#f3f4f6',
-                minHeight: 176
-              }}
+              className="service-card"
             >
               <Stack gap="sm" h="100%" justify="space-between">
                 <div>
@@ -469,12 +481,12 @@ export function DashboardPage() {
                         {service.label}
                       </Text>
                     </Group>
-                    <Badge color={statusColor(service.status)} variant="light" radius="xl" size="xs">
+                    <Badge color={statusColor(service.status)} variant="light" radius="xl" size="xs" className="status-pill">
                       {service.status}
                     </Badge>
                   </Group>
 
-                  <Title order={3} c="#f9fafb" lineClamp={1} style={{ lineHeight: 1.1 }}>
+                  <Title order={3} c="#f9fafb" lineClamp={1} style={{ lineHeight: 1.1, minHeight: 30 }}>
                     {service.selectedVersion || '-'}
                   </Title>
                   <Text size="xs" c="#9ca3af" mt={4} lineClamp={1}>

@@ -26,6 +26,7 @@ function projectColor(kind: string) {
 
 export function ProjectsPage() {
   const activePage = useUiStore((state) => state.activePage);
+  const globalSearch = useUiStore((state) => state.globalSearch);
   const [search, setSearch] = useState('');
   const [kind, setKind] = useState<string | null>(null);
 
@@ -43,13 +44,13 @@ export function ProjectsPage() {
     return Array.from(new Set(projects.map((project) => project.kind))).sort((a, b) => a.localeCompare(b));
   }, [projects]);
   const filtered = useMemo(() => {
-    const needle = search.trim().toLowerCase();
+    const needle = `${globalSearch} ${search}`.trim().toLowerCase();
     return projects.filter((project) => {
       const matchesKind = !kind || project.kind === kind;
       const haystack = `${project.name} ${project.path} ${project.domain ?? ''} ${project.kind}`.toLowerCase();
       return matchesKind && (!needle || haystack.includes(needle));
     });
-  }, [kind, projects, search]);
+  }, [globalSearch, kind, projects, search]);
 
   async function runAction(action: () => Promise<void>, label: string) {
     try {
@@ -65,12 +66,12 @@ export function ProjectsPage() {
 
   return (
     <Stack gap="xs">
-      <Card withBorder radius="sm" p="sm">
+      <Card withBorder radius="sm" p="sm" className="surface-muted">
         <Group justify="space-between" align="center">
           <div>
             <Title order={5}>Projects</Title>
             <Text c="dimmed" size="xs">
-              Folder project di C:\www dengan quick action harian.
+              Folder project di C:\www dengan quick action harian{globalSearch.trim() ? ` - ${filtered.length} matched` : ''}.
             </Text>
           </div>
           <Button size="xs" variant="light" leftSection={<IconRefresh size={14} />} onClick={() => void projectsQuery.refetch()} loading={projectsQuery.isFetching}>
@@ -79,7 +80,7 @@ export function ProjectsPage() {
         </Group>
       </Card>
 
-      <Card withBorder radius="sm" p="sm">
+      <Card withBorder radius="sm" p="sm" className="surface-muted">
         <Group grow align="flex-end">
           <TextInput
             size="xs"
@@ -101,16 +102,16 @@ export function ProjectsPage() {
         </Group>
       </Card>
 
-      <Card withBorder radius="sm" p={0} style={{ overflow: 'hidden' }}>
+      <Card withBorder radius="sm" p={0} style={{ overflow: 'hidden' }} className="surface-muted">
         {projectsQuery.isLoading ? (
           <Group justify="center" py="xl">
             <Loader />
           </Group>
         ) : filtered.length === 0 ? (
           <Stack gap={6} p="md">
-            <Text fw={700} size="sm">Belum ada project yang terbaca.</Text>
+            <Text fw={700} size="sm">No projects matched</Text>
             <Text c="dimmed" size="xs">
-              Buat folder project di C:\www atau buat virtual domain baru dari menu Domains.
+              Buat folder project di C:\www, kosongkan search, atau refresh daftar project.
             </Text>
           </Stack>
         ) : (

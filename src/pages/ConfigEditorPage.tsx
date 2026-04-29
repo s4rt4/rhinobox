@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
-import { Badge, Button, Card, Code, Group, Loader, ScrollArea, Stack, Switch, Text, TextInput, Textarea, Title, NavLink } from '@mantine/core';
+import { Badge, Button, Card, Code, Group, Loader, Stack, Switch, Text, TextInput, Textarea, Title, NavLink } from '@mantine/core';
 import { IconFileCode, IconSearch } from '@tabler/icons-react';
 import { notifications } from '@mantine/notifications';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
@@ -81,7 +81,7 @@ export function ConfigEditorPage() {
 
   return (
     <Stack gap="xs">
-      <Card withBorder radius="sm" p="sm">
+      <Card withBorder radius="sm" p="sm" className="surface-muted">
         <Group justify="space-between" align="center">
           <div>
             <Title order={5}>Config Editor</Title>
@@ -108,8 +108,8 @@ export function ConfigEditorPage() {
             <Loader />
           </Group>
         ) : (
-          <Group align="stretch" gap="xs" wrap="nowrap">
-            <Card withBorder radius="sm" p={6} style={{ width: 210, flex: '0 0 210px' }}>
+          <Group align="stretch" gap="xs" wrap="nowrap" style={{ minHeight: 0 }}>
+            <Card withBorder radius="sm" p={6} className="surface-muted" style={{ width: 210, flex: '0 0 210px' }}>
               <Stack gap={4}>
                 {(filesQuery.data ?? []).map((item) => (
                   <NavLink
@@ -131,13 +131,13 @@ export function ConfigEditorPage() {
             </Card>
 
             {fileQuery.isLoading ? (
-              <Card withBorder radius="sm" style={{ flex: 1 }}>
+              <Card withBorder radius="sm" className="surface-muted" style={{ flex: 1 }}>
               <Group justify="center" py="xl">
                 <Loader />
               </Group>
               </Card>
             ) : fileQuery.data ? (
-              <Card withBorder radius="sm" p="sm" style={{ flex: 1, minWidth: 0 }}>
+              <Card withBorder radius="sm" p="sm" className="surface-muted" style={{ flex: 1, minWidth: 0 }}>
                 <Stack gap="xs">
                 <Group justify="space-between" align="center" wrap="nowrap">
                   <Code
@@ -175,27 +175,21 @@ export function ConfigEditorPage() {
                     <Badge variant="light">{matchCount}</Badge>
                   </Stack>
                 </Group>
-                <ScrollArea
-                  h="calc(100vh - 276px)"
-                  offsetScrollbars
-                  scrollbarSize={5}
-                  type="auto"
-                >
-                  <Textarea
-                    autosize={false}
-                    minRows={28}
-                    maxRows={28}
-                    value={content}
-                    onChange={(event) => setContent(event.currentTarget.value)}
-                    styles={{
-                      input: {
-                        fontFamily: 'Consolas, monospace',
-                        fontSize: 13,
-                        minHeight: 'calc(100vh - 306px)'
-                      }
-                    }}
-                  />
-                </ScrollArea>
+                <Textarea
+                  autosize={false}
+                  minRows={18}
+                  value={content}
+                  onChange={(event) => setContent(event.currentTarget.value)}
+                  styles={{
+                    input: {
+                      fontFamily: 'Consolas, monospace',
+                      fontSize: 13,
+                      minHeight: 'calc(100vh - 316px)',
+                      maxHeight: 'calc(100vh - 316px)',
+                      overflow: 'auto'
+                    }
+                  }}
+                />
                 <Group justify="flex-end">
                   <Button
                     size="xs"
