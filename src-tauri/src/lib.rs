@@ -19,8 +19,9 @@ use std::{
 };
 use sysinfo::{Disks, Networks, System};
 use tauri::{
+    Emitter,
     image::Image,
-    menu::{MenuBuilder, MenuItemBuilder},
+    menu::{MenuBuilder, MenuItemBuilder, PredefinedMenuItem, Submenu},
     tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent},
     Manager, WindowEvent,
 };
@@ -223,6 +224,46 @@ fn show_main_window<R: tauri::Runtime, M: Manager<R>>(manager: &M) {
         let _ = window.show();
         let _ = window.set_focus();
     }
+}
+
+fn hide_main_window<R: tauri::Runtime, M: Manager<R>>(manager: &M) {
+    if let Some(window) = manager.get_webview_window("main") {
+        let _ = window.hide();
+    }
+}
+
+fn navigate_main_window(app: &tauri::AppHandle, page: &str) {
+    show_main_window(app);
+    let _ = app.emit("tray:navigate", page);
+}
+
+fn open_external_silent(target: &str) {
+    let _ = open_external(target.to_string());
+}
+
+fn tray_control_service(key: &'static str, action: &'static str) {
+    thread::spawn(move || {
+        let _ = control_service_inner(key.to_string(), action.to_string(), None);
+    });
+}
+
+fn tray_control_all(action: &'static str) {
+    thread::spawn(move || {
+        let services = [
+            "nginx",
+            "php_cgi",
+            "mariadb",
+            "postgresql",
+            "mailpit",
+            "pgweb",
+            "redis",
+            "memcached",
+        ];
+
+        for service in services {
+            let _ = control_service_inner(service.to_string(), action.to_string(), None);
+        }
+    });
 }
 
 fn new_background_command(program: &str) -> Command {
@@ -2305,9 +2346,79 @@ pub fn run() {
             let icon = Image::from_bytes(include_bytes!("../icons/icon.ico"))?;
 
             let open_item = MenuItemBuilder::with_id("tray_open", "Open RhinoBOX").build(app)?;
+            let hide_item = MenuItemBuilder::with_id("tray_hide", "Hide Window").build(app)?;
+            let dashboard_item = MenuItemBuilder::with_id("tray_page_dashboard", "Dashboard").build(app)?;
+            let projects_item = MenuItemBuilder::with_id("tray_page_projects", "Projects").build(app)?;
+            let vhosts_item = MenuItemBuilder::with_id("tray_page_vhosts", "Virtual Domains").build(app)?;
+            let config_item = MenuItemBuilder::with_id("tray_page_config", "Config Editor").build(app)?;
+            let logs_item = MenuItemBuilder::with_id("tray_page_logs", "Logs").build(app)?;
+            let monitor_item = MenuItemBuilder::with_id("tray_page_monitor", "Process Monitor").build(app)?;
+            let about_item = MenuItemBuilder::with_id("tray_page_about", "About").build(app)?;
+            let localhost_item = MenuItemBuilder::with_id("tray_open_localhost", "Localhost").build(app)?;
+            let phpmyadmin_item = MenuItemBuilder::with_id("tray_open_phpmyadmin", "phpMyAdmin").build(app)?;
+            let pgweb_item = MenuItemBuilder::with_id("tray_open_pgweb", "Pgweb").build(app)?;
+            let mailpit_item = MenuItemBuilder::with_id("tray_open_mailpit", "Mailpit").build(app)?;
+            let www_item = MenuItemBuilder::with_id("tray_open_www", "Open C:\\www").build(app)?;
+            let start_all_item = MenuItemBuilder::with_id("tray_services_start_all", "Start All").build(app)?;
+            let stop_all_item = MenuItemBuilder::with_id("tray_services_stop_all", "Stop All").build(app)?;
+            let restart_all_item = MenuItemBuilder::with_id("tray_services_restart_all", "Restart All").build(app)?;
+            let reload_nginx_item = MenuItemBuilder::with_id("tray_services_reload_nginx", "Reload nginx").build(app)?;
+            let start_mailpit_item = MenuItemBuilder::with_id("tray_services_start_mailpit", "Start Mailpit").build(app)?;
+            let start_pgweb_item = MenuItemBuilder::with_id("tray_services_start_pgweb", "Start Pgweb").build(app)?;
             let close_item = MenuItemBuilder::with_id("tray_close", "Close RhinoBOX").build(app)?;
+            let quick_separator = PredefinedMenuItem::separator(app)?;
+            let services_separator_a = PredefinedMenuItem::separator(app)?;
+            let services_separator_b = PredefinedMenuItem::separator(app)?;
+
+            let page_menu = Submenu::with_items(
+                app,
+                "Go to",
+                true,
+                &[
+                    &dashboard_item,
+                    &projects_item,
+                    &vhosts_item,
+                    &config_item,
+                    &logs_item,
+                    &monitor_item,
+                    &about_item,
+                ],
+            )?;
+            let quick_menu = Submenu::with_items(
+                app,
+                "Open",
+                true,
+                &[
+                    &localhost_item,
+                    &phpmyadmin_item,
+                    &pgweb_item,
+                    &mailpit_item,
+                    &quick_separator,
+                    &www_item,
+                ],
+            )?;
+            let services_menu = Submenu::with_items(
+                app,
+                "Services",
+                true,
+                &[
+                    &start_all_item,
+                    &stop_all_item,
+                    &restart_all_item,
+                    &services_separator_a,
+                    &reload_nginx_item,
+                    &services_separator_b,
+                    &start_mailpit_item,
+                    &start_pgweb_item,
+                ],
+            )?;
             let tray_menu = MenuBuilder::new(app)
                 .item(&open_item)
+                .item(&hide_item)
+                .separator()
+                .item(&page_menu)
+                .item(&quick_menu)
+                .item(&services_menu)
                 .separator()
                 .item(&close_item)
                 .build()?;
@@ -2329,6 +2440,39 @@ pub fn run() {
                 })
                 .on_menu_event(|app, event| match event.id().as_ref() {
                     "tray_open" => show_main_window(app),
+                    "tray_hide" => hide_main_window(app),
+                    "tray_page_dashboard" => navigate_main_window(app, "dashboard"),
+                    "tray_page_projects" => navigate_main_window(app, "projects"),
+                    "tray_page_vhosts" => navigate_main_window(app, "vhosts"),
+                    "tray_page_config" => navigate_main_window(app, "config"),
+                    "tray_page_logs" => navigate_main_window(app, "logs"),
+                    "tray_page_monitor" => navigate_main_window(app, "monitor"),
+                    "tray_page_about" => navigate_main_window(app, "about"),
+                    "tray_open_localhost" => open_external_silent("http://localhost/"),
+                    "tray_open_phpmyadmin" => open_external_silent("http://localhost/phpmyadmin/"),
+                    "tray_open_pgweb" => {
+                        thread::spawn(|| {
+                            let _ = control_service_inner("postgresql".into(), "start".into(), None);
+                            let _ = control_service_inner("pgweb".into(), "start".into(), None);
+                            open_external_silent("http://localhost:8081/");
+                        });
+                    }
+                    "tray_open_mailpit" => {
+                        thread::spawn(|| {
+                            let _ = control_service_inner("mailpit".into(), "start".into(), None);
+                            open_external_silent("http://localhost:8025/");
+                        });
+                    }
+                    "tray_open_www" => open_external_silent("C:\\www"),
+                    "tray_services_start_all" => tray_control_all("start"),
+                    "tray_services_stop_all" => tray_control_all("stop"),
+                    "tray_services_restart_all" => tray_control_all("restart"),
+                    "tray_services_reload_nginx" => tray_control_service("nginx", "reload"),
+                    "tray_services_start_mailpit" => tray_control_service("mailpit", "start"),
+                    "tray_services_start_pgweb" => {
+                        tray_control_service("postgresql", "start");
+                        tray_control_service("pgweb", "start");
+                    }
                     "tray_close" => {
                         app.state::<AppLifecycleState>()
                             .allow_exit

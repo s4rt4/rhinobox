@@ -1,5 +1,7 @@
+import { useEffect } from 'react';
 import { AppShell, Box } from '@mantine/core';
 import { invoke } from '@tauri-apps/api/core';
+import { listen } from '@tauri-apps/api/event';
 import { useDocumentVisibility } from '@mantine/hooks';
 import { useQuery } from '@tanstack/react-query';
 import { AppHeader } from './components/layout/AppHeader';
@@ -17,12 +19,16 @@ import { runtimeMode } from './lib/runtime';
 import { getServices } from './lib/servicesApi';
 import { getSystemMetrics } from './lib/systemMetricsApi';
 import { useUiStore } from './store/uiStore';
+import type { AppPage } from './types';
+
+const appPages: AppPage[] = ['dashboard', 'projects', 'vhosts', 'discovery', 'config', 'logs', 'monitor', 'about'];
 
 export function App() {
   const mode = runtimeMode();
   const activePage = useUiStore((state) => state.activePage);
   const globalSearch = useUiStore((state) => state.globalSearch);
   const setGlobalSearch = useUiStore((state) => state.setGlobalSearch);
+  const setActivePage = useUiStore((state) => state.setActivePage);
   const documentVisibility = useDocumentVisibility();
   const isVisible = documentVisibility === 'visible';
   const servicesQuery = useQuery({
@@ -48,6 +54,29 @@ export function App() {
   );
   const running = controllableServices.filter((item) => item.status === 'running').length;
   const total = controllableServices.length;
+
+  useEffect(() => {
+    if (mode !== 'tauri') return undefined;
+
+    let disposed = false;
+    let unlisten: (() => void) | undefined;
+    void listen<string>('tray:navigate', (event) => {
+      if (appPages.includes(event.payload as AppPage)) {
+        setActivePage(event.payload as AppPage);
+      }
+    }).then((handler) => {
+      if (disposed) {
+        handler();
+        return;
+      }
+      unlisten = handler;
+    });
+
+    return () => {
+      disposed = true;
+      unlisten?.();
+    };
+  }, [mode, setActivePage]);
 
   function terminateApp() {
     if (mode === 'tauri') {
