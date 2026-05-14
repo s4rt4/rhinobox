@@ -2562,7 +2562,7 @@ fn control_service_inner(key: String, action: String, version: Option<String>) -
                 .map(|path| path.to_string_lossy().to_string())
                 .unwrap_or_else(|| "C:\\www".into());
             let script = format!(
-                "Start-Process -FilePath '{exe}' -ArgumentList '/bind:127.0.0.1', '/listen:8081', '/host:127.0.0.1', '/port:5432', '/user:postgres', '/pass:postgres', '/db:postgres', '/ssl:disable', '/skip-open' -WorkingDirectory '{root}' -WindowStyle Hidden; 'Pgweb started'"
+                "Start-Process -FilePath '{exe}' -ArgumentList '/bind:127.0.0.1', '/listen:8081', '/host:127.0.0.1', '/port:5432', '/user:postgres', '/db:postgres', '/ssl:disable', '/skip-open' -WorkingDirectory '{root}' -WindowStyle Hidden; 'Pgweb started'"
             );
             powershell(&script)
         },
@@ -2578,7 +2578,7 @@ fn control_service_inner(key: String, action: String, version: Option<String>) -
                 .map(|path| path.to_string_lossy().to_string())
                 .unwrap_or_else(|| "C:\\www".into());
             let script = format!(
-                "Get-Process pgweb -ErrorAction SilentlyContinue | Stop-Process -Force; Start-Sleep -Milliseconds 300; Start-Process -FilePath '{exe}' -ArgumentList '/bind:127.0.0.1', '/listen:8081', '/host:127.0.0.1', '/port:5432', '/user:postgres', '/pass:postgres', '/db:postgres', '/ssl:disable', '/skip-open' -WorkingDirectory '{root}' -WindowStyle Hidden; 'Pgweb restarted'"
+                "Get-Process pgweb -ErrorAction SilentlyContinue | Stop-Process -Force; Start-Sleep -Milliseconds 300; Start-Process -FilePath '{exe}' -ArgumentList '/bind:127.0.0.1', '/listen:8081', '/host:127.0.0.1', '/port:5432', '/user:postgres', '/db:postgres', '/ssl:disable', '/skip-open' -WorkingDirectory '{root}' -WindowStyle Hidden; 'Pgweb restarted'"
             );
             powershell(&script)
         },
