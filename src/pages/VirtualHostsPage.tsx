@@ -9,7 +9,7 @@ import { useUiStore } from '../store/uiStore';
 
 function defaultRoot(name: string) {
   const clean = projectSlug(name);
-  return clean ? `C:\\www\\${clean}` : 'C:\\www\\myapp';
+  return clean ? `Auto web root\\${clean}` : 'Auto web root\\myapp';
 }
 
 function projectSlug(name: string) {
@@ -88,7 +88,7 @@ export function VirtualHostsPage() {
           <div>
             <Title order={5}>Virtual Domains</Title>
             <Text c="dimmed" size="xs">
-              Buat domain lokal `.test` atau `.local` untuk project di `C:\www`{globalSearch.trim() ? ` - ${filteredHosts.length} matched` : ''}.
+              Buat domain lokal `.test` atau `.local` untuk project di web root aktif{globalSearch.trim() ? ` - ${filteredHosts.length} matched` : ''}.
             </Text>
           </div>
           <Button size="xs" variant="light" leftSection={<IconRefresh size={14} />} onClick={() => void vhostsQuery.refetch()} loading={vhostsQuery.isFetching}>
@@ -131,7 +131,7 @@ export function VirtualHostsPage() {
               loading={createMutation.isPending}
               onClick={() => {
                 const cleanName = projectSlug(name);
-                createMutation.mutate({ name: cleanName, tld, root: customRoot.trim() || defaultRoot(cleanName) });
+                createMutation.mutate({ name: cleanName, tld, root: customRoot.trim() });
               }}
               disabled={!projectSlug(name)}
             >

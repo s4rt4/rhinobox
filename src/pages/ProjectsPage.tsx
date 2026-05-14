@@ -103,7 +103,7 @@ export function ProjectsPage() {
           <div>
             <Title order={5}>Projects</Title>
             <Text c="dimmed" size="xs">
-              Folder project di C:\www dengan quick action harian{globalSearch.trim() ? ` - ${filtered.length} matched` : ''}.
+              Folder project di web root aktif dengan quick action harian{globalSearch.trim() ? ` - ${filtered.length} matched` : ''}.
             </Text>
           </div>
           <Button size="xs" variant="light" leftSection={<IconRefresh size={14} />} onClick={() => void projectsQuery.refetch()} loading={projectsQuery.isFetching}>
@@ -143,7 +143,7 @@ export function ProjectsPage() {
           <Stack gap={6} p="md">
             <Text fw={700} size="sm">No projects matched</Text>
             <Text c="dimmed" size="xs">
-              Buat folder project di C:\www, kosongkan search, atau refresh daftar project.
+              Buat folder project di web root aktif, kosongkan search, atau refresh daftar project.
             </Text>
           </Stack>
         ) : (

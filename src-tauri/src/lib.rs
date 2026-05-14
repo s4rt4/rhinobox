@@ -4,10 +4,11 @@ use once_cell::sync::Lazy;
 use std::os::windows::process::CommandExt;
 use std::{
     collections::{HashMap, HashSet},
+    env,
     fs,
     io::{BufRead, BufReader, Read, Write},
     net::{TcpListener, TcpStream},
-    path::Path,
+    path::{Path, PathBuf},
     process::Command,
     sync::{
         atomic::{AtomicBool, Ordering},
@@ -26,15 +27,9 @@ use tauri::{
     Manager, WindowEvent,
 };
 
-const SERVICE_SELECTION_FILE: &str = "C:\\www\\rhinobox\\service-selection.json";
-const VHOSTS_FILE: &str = "C:\\www\\rhinobox\\virtual-hosts.json";
-const VHOSTS_DIR: &str = "C:\\www\\rhinobox\\config\\nginx\\vhosts";
 const MAILPIT_VERSION: &str = "1.29.7";
-const MAILPIT_EXE: &str = "C:\\www\\runtimes\\mailpit\\1.29.7\\mailpit.exe";
 const PGWEB_VERSION: &str = "0.16.2";
-const PGWEB_EXE: &str = "C:\\www\\runtimes\\pgweb\\0.16.2\\pgweb.exe";
 const REDIS_VERSION: &str = "8.6.2";
-const REDIS_EXE: &str = "C:\\www\\runtimes\\redis\\8.6.2\\Redis-8.6.2-Windows-x64-msys2\\redis-server.exe";
 const REDIS_CONF: &str = "redis-rhinobox.conf";
 const MEMCACHED_VERSION: &str = "lite";
 const MEMCACHED_PORT: u16 = 11211;
@@ -218,6 +213,111 @@ struct AppLifecycleState {
     allow_exit: AtomicBool,
 }
 
+fn path_string(path: PathBuf) -> String {
+    path.to_string_lossy().to_string()
+}
+
+fn app_home_path() -> PathBuf {
+    if let Ok(value) = env::var("RHINOBOX_HOME") {
+        let path = PathBuf::from(value);
+        if path.exists() {
+            return path;
+        }
+    }
+
+    if let Ok(cwd) = env::current_dir() {
+        if cwd.join("src-tauri").exists() && cwd.join("package.json").exists() {
+            return cwd;
+        }
+    }
+
+    if let Ok(exe) = env::current_exe() {
+        if let Some(parent) = exe.parent() {
+            let parent = parent.to_path_buf();
+            if parent.join("runtimes").exists()
+                || parent.join("www").exists()
+                || parent.join("config").exists()
+                || parent.join("portable.txt").exists()
+            {
+                return parent;
+            }
+            if let Some(grandparent) = parent.parent() {
+                let grandparent = grandparent.to_path_buf();
+                if grandparent.join("runtimes").exists()
+                    || grandparent.join("www").exists()
+                    || grandparent.join("config").exists()
+                    || grandparent.join("portable.txt").exists()
+                {
+                    return grandparent;
+                }
+            }
+            return parent;
+        }
+    }
+
+    PathBuf::from("C:\\www\\rhinobox")
+}
+
+fn web_root_path() -> PathBuf {
+    if let Ok(value) = env::var("RHINOBOX_WEB_ROOT") {
+        return PathBuf::from(value);
+    }
+
+    let portable_www = app_home_path().join("www");
+    if portable_www.exists() || env::var("RHINOBOX_PORTABLE").ok().as_deref() == Some("1") {
+        portable_www
+    } else {
+        PathBuf::from("C:\\www")
+    }
+}
+
+fn runtimes_root_path() -> PathBuf {
+    if let Ok(value) = env::var("RHINOBOX_RUNTIMES") {
+        return PathBuf::from(value);
+    }
+
+    let portable_runtimes = app_home_path().join("runtimes");
+    if portable_runtimes.exists() || env::var("RHINOBOX_PORTABLE").ok().as_deref() == Some("1") {
+        portable_runtimes
+    } else {
+        PathBuf::from("C:\\www\\runtimes")
+    }
+}
+
+fn service_selection_file_path() -> PathBuf {
+    app_home_path().join("service-selection.json")
+}
+
+fn vhosts_file_path() -> PathBuf {
+    app_home_path().join("virtual-hosts.json")
+}
+
+fn vhosts_dir_path() -> PathBuf {
+    app_home_path().join("config").join("nginx").join("vhosts")
+}
+
+fn mailpit_exe_path() -> PathBuf {
+    runtimes_root_path()
+        .join("mailpit")
+        .join(MAILPIT_VERSION)
+        .join("mailpit.exe")
+}
+
+fn pgweb_exe_path() -> PathBuf {
+    runtimes_root_path()
+        .join("pgweb")
+        .join(PGWEB_VERSION)
+        .join("pgweb.exe")
+}
+
+fn redis_exe_path() -> PathBuf {
+    runtimes_root_path()
+        .join("redis")
+        .join(REDIS_VERSION)
+        .join("Redis-8.6.2-Windows-x64-msys2")
+        .join("redis-server.exe")
+}
+
 fn show_main_window<R: tauri::Runtime, M: Manager<R>>(manager: &M) {
     if let Some(window) = manager.get_webview_window("main") {
         let _ = window.unminimize();
@@ -364,18 +464,18 @@ fn runtime_discovery_snapshot() -> RuntimeDiscoverySnapshot {
             }
         }),
         git_version: command_version("git", &["--version"]),
-        mailpit_path: if Path::new(MAILPIT_EXE).exists() {
-            Some(MAILPIT_EXE.to_string())
+        mailpit_path: if mailpit_exe_path().exists() {
+            Some(path_string(mailpit_exe_path()))
         } else {
             command_exists_path("mailpit")
         },
-        pgweb_path: if Path::new(PGWEB_EXE).exists() {
-            Some(PGWEB_EXE.to_string())
+        pgweb_path: if pgweb_exe_path().exists() {
+            Some(path_string(pgweb_exe_path()))
         } else {
             command_exists_path("pgweb")
         },
-        redis_path: if Path::new(REDIS_EXE).exists() {
-            Some(REDIS_EXE.to_string())
+        redis_path: if redis_exe_path().exists() {
+            Some(path_string(redis_exe_path()))
         } else {
             command_exists_path("redis-server")
         },
@@ -604,20 +704,30 @@ fn windows_service_status(name: &str) -> ServiceStatus {
 }
 
 fn config_files() -> Vec<ConfigFileSummary> {
+    let nginx_current = get_selected_service_version("nginx").unwrap_or_else(|| "1.29.8".into());
+    let php_current = get_selected_service_version("php_cgi").unwrap_or_else(|| "8.4.20".into());
+    let nginx_conf = nginx_version_path(&nginx_current)
+        .map(|root| format!("{root}\\conf\\nginx.conf"))
+        .unwrap_or_else(|| path_string(runtimes_root_path().join("nginx").join(&nginx_current).join("conf").join("nginx.conf")));
+    let php_ini = php_version_path(&php_current)
+        .map(|root| format!("{root}\\php.ini"))
+        .unwrap_or_else(|| path_string(runtimes_root_path().join("php").join(&php_current).join("php.ini")));
+    let phpmyadmin_config = path_string(web_root_path().join("phpmyadmin").join("config.inc.php"));
+
     vec![
         ConfigFileSummary {
             key: "nginx".into(),
             label: "nginx.conf".into(),
-            path: "C:\\Users\\Admin\\AppData\\Local\\Microsoft\\WinGet\\Packages\\nginxinc.nginx_Microsoft.Winget.Source_8wekyb3d8bbwe\\nginx-1.29.8\\conf\\nginx.conf".into(),
+            path: nginx_conf.clone(),
             service_key: Some("nginx".into()),
-            exists: Some(Path::new("C:\\Users\\Admin\\AppData\\Local\\Microsoft\\WinGet\\Packages\\nginxinc.nginx_Microsoft.Winget.Source_8wekyb3d8bbwe\\nginx-1.29.8\\conf\\nginx.conf").exists()),
+            exists: Some(Path::new(&nginx_conf).exists()),
         },
         ConfigFileSummary {
             key: "php".into(),
             label: "php.ini".into(),
-            path: "C:\\Users\\Admin\\AppData\\Local\\Microsoft\\WinGet\\Packages\\PHP.PHP.8.4_Microsoft.Winget.Source_8wekyb3d8bbwe\\php.ini".into(),
+            path: php_ini.clone(),
             service_key: Some("php_cgi".into()),
-            exists: Some(Path::new("C:\\Users\\Admin\\AppData\\Local\\Microsoft\\WinGet\\Packages\\PHP.PHP.8.4_Microsoft.Winget.Source_8wekyb3d8bbwe\\php.ini").exists()),
+            exists: Some(Path::new(&php_ini).exists()),
         },
         ConfigFileSummary {
             key: "mariadb".into(),
@@ -629,9 +739,9 @@ fn config_files() -> Vec<ConfigFileSummary> {
         ConfigFileSummary {
             key: "phpmyadmin".into(),
             label: "config.inc.php".into(),
-            path: "C:\\www\\phpmyadmin\\config.inc.php".into(),
+            path: phpmyadmin_config.clone(),
             service_key: None,
-            exists: Some(Path::new("C:\\www\\phpmyadmin\\config.inc.php").exists()),
+            exists: Some(Path::new(&phpmyadmin_config).exists()),
         },
         ConfigFileSummary {
             key: "postgresql".into(),
@@ -651,15 +761,18 @@ fn config_files() -> Vec<ConfigFileSummary> {
 }
 
 fn read_service_selection_state() -> ServiceSelectionState {
-    fs::read_to_string(SERVICE_SELECTION_FILE)
+    fs::read_to_string(service_selection_file_path())
         .ok()
         .and_then(|content| serde_json::from_str::<ServiceSelectionState>(&content).ok())
         .unwrap_or_default()
 }
 
 fn write_service_selection_state(state: &ServiceSelectionState) -> Result<(), String> {
+    if let Some(parent) = service_selection_file_path().parent() {
+        fs::create_dir_all(parent).map_err(|e| e.to_string())?;
+    }
     let content = serde_json::to_string_pretty(state).map_err(|e| e.to_string())?;
-    fs::write(SERVICE_SELECTION_FILE, content).map_err(|e| e.to_string())
+    fs::write(service_selection_file_path(), content).map_err(|e| e.to_string())
 }
 
 fn get_selected_service_version(key: &str) -> Option<String> {
@@ -725,22 +838,23 @@ fn sanitize_vhost_tld(tld: &str) -> Result<String, String> {
 }
 
 fn vhost_config_path(domain: &str) -> String {
-    format!("{VHOSTS_DIR}\\{domain}.conf")
+    path_string(vhosts_dir_path().join(format!("{domain}.conf")))
 }
 
 fn read_virtual_host_records() -> Vec<VirtualHostRecord> {
-    fs::read_to_string(VHOSTS_FILE)
+    fs::read_to_string(vhosts_file_path())
         .ok()
         .and_then(|content| serde_json::from_str::<Vec<VirtualHostRecord>>(&content).ok())
         .unwrap_or_default()
 }
 
 fn write_virtual_host_records(records: &[VirtualHostRecord]) -> Result<(), String> {
-    if let Some(parent) = Path::new(VHOSTS_FILE).parent() {
+    let file_path = vhosts_file_path();
+    if let Some(parent) = file_path.parent() {
         fs::create_dir_all(parent).map_err(|e| e.to_string())?;
     }
     let content = serde_json::to_string_pretty(records).map_err(|e| e.to_string())?;
-    fs::write(VHOSTS_FILE, content).map_err(|e| e.to_string())
+    fs::write(file_path, content).map_err(|e| e.to_string())
 }
 
 fn normalize_windows_path(path: &str) -> String {
@@ -774,12 +888,12 @@ fn detect_project_kind(path: &str) -> String {
 }
 
 fn list_projects_inner() -> Vec<ProjectSummary> {
-    let web_root = "C:\\www";
+    let web_root = web_root_path();
     let ignored = ["phpmyadmin", "rhinobox", "runtimes"];
     let vhosts = read_virtual_host_records();
     let mut projects = Vec::new();
 
-    let Ok(entries) = fs::read_dir(web_root) else {
+    let Ok(entries) = fs::read_dir(&web_root) else {
         return projects;
     };
 
@@ -954,8 +1068,8 @@ fn vhost_nginx_config(domain: &str, root: &str) -> String {
 }
 
 fn ensure_nginx_vhost_include() -> Result<(), String> {
-    fs::create_dir_all(VHOSTS_DIR).map_err(|e| e.to_string())?;
-    let include_line = "include C:/www/rhinobox/config/nginx/vhosts/*.conf;";
+    fs::create_dir_all(vhosts_dir_path()).map_err(|e| e.to_string())?;
+    let include_line = format!("include {}/*.conf;", normalize_nginx_path(&path_string(vhosts_dir_path())));
 
     for version in installed_nginx_versions() {
         let Some(root) = nginx_version_path(&version) else {
@@ -965,7 +1079,7 @@ fn ensure_nginx_vhost_include() -> Result<(), String> {
         let Ok(content) = fs::read_to_string(&config_path) else {
             continue;
         };
-        if content.contains(include_line) {
+        if content.contains(&include_line) {
             continue;
         }
 
@@ -1028,7 +1142,7 @@ fn create_virtual_host_inner(name: String, tld: String, root: String) -> Result<
     let name = sanitize_vhost_name(&name)?;
     let tld = sanitize_vhost_tld(&tld)?;
     let root = if root.trim().is_empty() {
-        format!("C:\\www\\{name}")
+        path_string(web_root_path().join(&name))
     } else {
         root.trim().to_string()
     };
@@ -1045,7 +1159,7 @@ fn create_virtual_host_inner(name: String, tld: String, root: String) -> Result<
         fs::write(&index_path, format!("<?php\nphpinfo();\n// {domain}\n")).map_err(|e| e.to_string())?;
     }
 
-    fs::create_dir_all(VHOSTS_DIR).map_err(|e| e.to_string())?;
+    fs::create_dir_all(vhosts_dir_path()).map_err(|e| e.to_string())?;
     fs::write(vhost_config_path(&domain), vhost_nginx_config(&domain, &document_root)).map_err(|e| e.to_string())?;
     ensure_nginx_vhost_include()?;
 
@@ -1097,6 +1211,13 @@ fn remove_virtual_host_inner(domain: String) -> Result<String, String> {
 
 fn node_version_candidates() -> Vec<String> {
     let mut candidates = Vec::new();
+    for version in runtime_version_dirs(runtimes_root_path().join("node")) {
+        let exe = runtimes_root_path().join("node").join(&version).join("node.exe");
+        if exe.exists() {
+            candidates.push(path_string(exe));
+        }
+    }
+
     let primary = "C:\\Program Files\\nodejs\\node.exe";
     if Path::new(primary).exists() {
         candidates.push(primary.to_string());
@@ -1148,22 +1269,64 @@ fn node_versions_with_paths() -> Vec<(String, String)> {
     versions
 }
 
-fn nginx_version_path(version: &str) -> Option<String> {
-    match version {
-        "1.29.8" => Some("C:\\Users\\Admin\\AppData\\Local\\Microsoft\\WinGet\\Packages\\nginxinc.nginx_Microsoft.Winget.Source_8wekyb3d8bbwe\\nginx-1.29.8".into()),
-        "1.30.0" => Some("C:\\www\\runtimes\\nginx\\1.30.0\\nginx-1.30.0".into()),
-        _ => None,
+fn runtime_version_dirs(root: PathBuf) -> Vec<String> {
+    let mut versions = Vec::new();
+    if let Ok(entries) = fs::read_dir(root) {
+        for entry in entries.flatten() {
+            let path = entry.path();
+            if !path.is_dir() {
+                continue;
+            }
+            if let Some(name) = path.file_name().and_then(|value| value.to_str()) {
+                versions.push(name.to_string());
+            }
+        }
     }
+    versions.sort_by(|left, right| right.cmp(left));
+    versions.dedup();
+    versions
+}
+
+fn nginx_version_path(version: &str) -> Option<String> {
+    let roots = [runtimes_root_path(), PathBuf::from("C:\\www\\runtimes")];
+    for root in roots {
+        let candidate = root.join("nginx").join(version);
+        let nested = candidate.join(format!("nginx-{version}"));
+        if candidate.join("nginx.exe").exists() {
+            return Some(path_string(candidate));
+        }
+        if nested.join("nginx.exe").exists() {
+            return Some(path_string(nested));
+        }
+    }
+
+    if version == "1.29.8" {
+        let legacy = PathBuf::from("C:\\Users\\Admin\\AppData\\Local\\Microsoft\\WinGet\\Packages\\nginxinc.nginx_Microsoft.Winget.Source_8wekyb3d8bbwe\\nginx-1.29.8");
+        if legacy.join("nginx.exe").exists() {
+            return Some(path_string(legacy));
+        }
+    }
+
+    None
 }
 
 fn php_version_path(version: &str) -> Option<String> {
-    match version {
-        "8.1.34" => Some("C:\\www\\runtimes\\php\\8.1.34".into()),
-        "8.3.30" => Some("C:\\www\\runtimes\\php\\8.3.30".into()),
-        "8.4.20" => Some("C:\\Users\\Admin\\AppData\\Local\\Microsoft\\WinGet\\Packages\\PHP.PHP.8.4_Microsoft.Winget.Source_8wekyb3d8bbwe".into()),
-        "8.5.5" => Some("C:\\www\\runtimes\\php\\8.5.5".into()),
-        _ => None,
+    let roots = [runtimes_root_path(), PathBuf::from("C:\\www\\runtimes")];
+    for root in roots {
+        let candidate = root.join("php").join(version);
+        if candidate.join("php.exe").exists() {
+            return Some(path_string(candidate));
+        }
     }
+
+    if version == "8.4.20" {
+        let legacy = PathBuf::from("C:\\Users\\Admin\\AppData\\Local\\Microsoft\\WinGet\\Packages\\PHP.PHP.8.4_Microsoft.Winget.Source_8wekyb3d8bbwe");
+        if legacy.join("php.exe").exists() {
+            return Some(path_string(legacy));
+        }
+    }
+
+    None
 }
 
 fn postgresql_service_name() -> String {
@@ -1180,27 +1343,25 @@ fn postgresql_bin_path() -> Option<String> {
 }
 
 fn installed_nginx_versions() -> Vec<String> {
-    ["1.29.8", "1.30.0"]
-        .into_iter()
-        .filter(|version| {
-            nginx_version_path(version)
-                .map(|path| Path::new(&path).exists())
-                .unwrap_or(false)
-        })
-        .map(|version| version.to_string())
-        .collect()
+    let mut versions = runtime_version_dirs(runtimes_root_path().join("nginx"));
+    versions.extend(runtime_version_dirs(PathBuf::from("C:\\www\\runtimes\\nginx")));
+    if nginx_version_path("1.29.8").is_some() {
+        versions.push("1.29.8".into());
+    }
+    versions.sort();
+    versions.dedup();
+    versions
 }
 
 fn installed_php_versions() -> Vec<String> {
-    ["8.1.34", "8.3.30", "8.4.20", "8.5.5"]
-        .into_iter()
-        .filter(|version| {
-            php_version_path(version)
-                .map(|path| Path::new(&path).exists())
-                .unwrap_or(false)
-        })
-        .map(|version| version.to_string())
-        .collect()
+    let mut versions = runtime_version_dirs(runtimes_root_path().join("php"));
+    versions.extend(runtime_version_dirs(PathBuf::from("C:\\www\\runtimes\\php")));
+    if php_version_path("8.4.20").is_some() {
+        versions.push("8.4.20".into());
+    }
+    versions.sort();
+    versions.dedup();
+    versions
 }
 
 fn service_versions(key: &str) -> Vec<String> {
@@ -1533,7 +1694,7 @@ fn get_services_inner() -> Vec<ManagedService> {
 
 #[tauri::command]
 fn get_discovery() -> Vec<DiscoveryItem> {
-    let _ = fs::create_dir_all(VHOSTS_DIR);
+    let _ = fs::create_dir_all(vhosts_dir_path());
     let discovery = runtime_discovery_snapshot();
     let nginx_current = get_selected_service_version("nginx").unwrap_or_else(|| "1.29.8".into());
     let php_current = get_selected_service_version("php_cgi").unwrap_or_else(|| "8.4.20".into());
@@ -1556,33 +1717,27 @@ fn get_discovery() -> Vec<DiscoveryItem> {
         })
         .or_else(|| discovery.node_version_paths.first().map(|(_, path)| path.clone()))
         .unwrap_or_else(|| "C:\\Program Files\\nodejs\\node.exe".into());
-    let mailpit_path = discovery
-        .mailpit_path
-        .clone()
-        .unwrap_or_else(|| MAILPIT_EXE.into());
-    let pgweb_path = discovery
-        .pgweb_path
-        .clone()
-        .unwrap_or_else(|| PGWEB_EXE.into());
-    let redis_path = discovery
-        .redis_path
-        .clone()
-        .unwrap_or_else(|| REDIS_EXE.into());
+    let mailpit_path = discovery.mailpit_path.clone().unwrap_or_else(|| path_string(mailpit_exe_path()));
+    let pgweb_path = discovery.pgweb_path.clone().unwrap_or_else(|| path_string(pgweb_exe_path()));
+    let redis_path = discovery.redis_path.clone().unwrap_or_else(|| path_string(redis_exe_path()));
+    let app_home = path_string(app_home_path());
+    let web_root = path_string(web_root_path());
+    let vhosts_dir = path_string(vhosts_dir_path());
 
     vec![
         DiscoveryItem {
             key: "workspace".into(),
             label: "Workspace".into(),
-            value: "C:\\www\\rhinobox".into(),
+            value: app_home.clone(),
             source: "derived".into(),
-            available: Some(Path::new("C:\\www\\rhinobox").exists()),
+            available: Some(Path::new(&app_home).exists()),
         },
         DiscoveryItem {
             key: "web_root".into(),
             label: "Web root".into(),
-            value: "C:\\www".into(),
+            value: web_root.clone(),
             source: "detected".into(),
-            available: Some(Path::new("C:\\www").exists()),
+            available: Some(Path::new(&web_root).exists()),
         },
         DiscoveryItem {
             key: "nginx_bin".into(),
@@ -1671,9 +1826,9 @@ fn get_discovery() -> Vec<DiscoveryItem> {
         DiscoveryItem {
             key: "vhosts_dir".into(),
             label: "Virtual host configs".into(),
-            value: VHOSTS_DIR.into(),
+            value: vhosts_dir.clone(),
             source: "derived".into(),
-            available: Some(Path::new(VHOSTS_DIR).exists()),
+            available: Some(Path::new(&vhosts_dir).exists()),
         },
     ]
 }
@@ -1766,6 +1921,10 @@ fn is_protected_process_name(name: &str) -> bool {
 
 #[tauri::command]
 fn get_logs() -> Vec<LogTarget> {
+    let nginx_current = get_selected_service_version("nginx").unwrap_or_else(|| "1.29.8".into());
+    let nginx_log = nginx_version_path(&nginx_current)
+        .map(|root| format!("{root}\\logs\\error.log"))
+        .unwrap_or_else(|| path_string(runtimes_root_path().join("nginx").join(&nginx_current).join("logs").join("error.log")));
     let postgres_log = latest_matching_file(
         "C:\\Program Files\\PostgreSQL\\17\\data\\log",
         "postgresql-",
@@ -1777,7 +1936,7 @@ fn get_logs() -> Vec<LogTarget> {
         (
             "nginx_error".to_string(),
             "nginx error.log".to_string(),
-            "C:\\Users\\Admin\\AppData\\Local\\Microsoft\\WinGet\\Packages\\nginxinc.nginx_Microsoft.Winget.Source_8wekyb3d8bbwe\\nginx-1.29.8\\logs\\error.log".to_string(),
+            nginx_log,
         ),
         (
             "mariadb_error".to_string(),
@@ -2018,8 +2177,8 @@ fn control_service_inner(key: String, action: String, version: Option<String>) -
         ("postgresql", "stop") => powershell("Stop-Service -Name 'postgresql-x64-17' -Force; 'PostgreSQL stopped'"),
         ("postgresql", "restart") => powershell("Restart-Service -Name 'postgresql-x64-17' -Force; 'PostgreSQL restarted'"),
         ("mailpit", "start") => {
-            let exe = if Path::new(MAILPIT_EXE).exists() {
-                MAILPIT_EXE.to_string()
+            let exe = if mailpit_exe_path().exists() {
+                path_string(mailpit_exe_path())
             } else {
                 command_exists_path("mailpit").ok_or_else(|| "Mailpit binary not found".to_string())?
             };
@@ -2034,8 +2193,8 @@ fn control_service_inner(key: String, action: String, version: Option<String>) -
         },
         ("mailpit", "stop") => powershell("Get-Process mailpit -ErrorAction SilentlyContinue | Stop-Process -Force; 'Mailpit stopped'"),
         ("mailpit", "restart") => {
-            let exe = if Path::new(MAILPIT_EXE).exists() {
-                MAILPIT_EXE.to_string()
+            let exe = if mailpit_exe_path().exists() {
+                path_string(mailpit_exe_path())
             } else {
                 command_exists_path("mailpit").ok_or_else(|| "Mailpit binary not found".to_string())?
             };
@@ -2049,8 +2208,8 @@ fn control_service_inner(key: String, action: String, version: Option<String>) -
             powershell(&script)
         },
         ("pgweb", "start") => {
-            let exe = if Path::new(PGWEB_EXE).exists() {
-                PGWEB_EXE.to_string()
+            let exe = if pgweb_exe_path().exists() {
+                path_string(pgweb_exe_path())
             } else {
                 command_exists_path("pgweb").ok_or_else(|| "Pgweb binary not found".to_string())?
             };
@@ -2065,8 +2224,8 @@ fn control_service_inner(key: String, action: String, version: Option<String>) -
         },
         ("pgweb", "stop") => powershell("Get-Process pgweb -ErrorAction SilentlyContinue | Stop-Process -Force; 'Pgweb stopped'"),
         ("pgweb", "restart") => {
-            let exe = if Path::new(PGWEB_EXE).exists() {
-                PGWEB_EXE.to_string()
+            let exe = if pgweb_exe_path().exists() {
+                path_string(pgweb_exe_path())
             } else {
                 command_exists_path("pgweb").ok_or_else(|| "Pgweb binary not found".to_string())?
             };
@@ -2080,8 +2239,8 @@ fn control_service_inner(key: String, action: String, version: Option<String>) -
             powershell(&script)
         },
         ("redis", "start") => {
-            let exe = if Path::new(REDIS_EXE).exists() {
-                REDIS_EXE.to_string()
+            let exe = if redis_exe_path().exists() {
+                path_string(redis_exe_path())
             } else {
                 command_exists_path("redis-server").ok_or_else(|| "Redis binary not found".to_string())?
             };
@@ -2103,8 +2262,8 @@ fn control_service_inner(key: String, action: String, version: Option<String>) -
         },
         ("redis", "stop") => powershell("Get-Process redis-server -ErrorAction SilentlyContinue | Stop-Process -Force; 'Redis stopped'"),
         ("redis", "restart") => {
-            let exe = if Path::new(REDIS_EXE).exists() {
-                REDIS_EXE.to_string()
+            let exe = if redis_exe_path().exists() {
+                path_string(redis_exe_path())
             } else {
                 command_exists_path("redis-server").ok_or_else(|| "Redis binary not found".to_string())?
             };
@@ -2358,7 +2517,7 @@ pub fn run() {
             let phpmyadmin_item = MenuItemBuilder::with_id("tray_open_phpmyadmin", "phpMyAdmin").build(app)?;
             let pgweb_item = MenuItemBuilder::with_id("tray_open_pgweb", "Pgweb").build(app)?;
             let mailpit_item = MenuItemBuilder::with_id("tray_open_mailpit", "Mailpit").build(app)?;
-            let www_item = MenuItemBuilder::with_id("tray_open_www", "Open C:\\www").build(app)?;
+            let www_item = MenuItemBuilder::with_id("tray_open_www", "Open web root").build(app)?;
             let start_all_item = MenuItemBuilder::with_id("tray_services_start_all", "Start All").build(app)?;
             let stop_all_item = MenuItemBuilder::with_id("tray_services_stop_all", "Stop All").build(app)?;
             let restart_all_item = MenuItemBuilder::with_id("tray_services_restart_all", "Restart All").build(app)?;
@@ -2463,7 +2622,7 @@ pub fn run() {
                             open_external_silent("http://localhost:8025/");
                         });
                     }
-                    "tray_open_www" => open_external_silent("C:\\www"),
+                    "tray_open_www" => open_external_silent(&path_string(web_root_path())),
                     "tray_services_start_all" => tray_control_all("start"),
                     "tray_services_stop_all" => tray_control_all("stop"),
                     "tray_services_restart_all" => tray_control_all("restart"),

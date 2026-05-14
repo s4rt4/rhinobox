@@ -18,7 +18,7 @@ RhinoBOX currently focuses on:
 - `Mailpit`, `Pgweb`, `Redis`, and Memcached Lite service control
 - multi-version switching for `nginx`, `PHP`, and `Node.js`
 - quick launch actions for `localhost`, `phpMyAdmin`, `Mailpit`, and `Pgweb`
-- project listing and quick actions from `C:\www`
+- project listing and quick actions from the active web root
 - discovery of important local paths
 - config editing for environment files
 - tabbed log viewing
@@ -26,6 +26,56 @@ RhinoBOX currently focuses on:
 - virtual domains with `.test` / `.local` style local hostnames
 
 The app is designed first for real local Windows setups, including installs that come from mixed sources such as Winget, custom folders, and manual runtime drops.
+
+## Portable Mode
+
+RhinoBOX can now resolve its home folder from the executable location. If the folder beside `RhinoBOX.exe` contains `portable.txt`, `www`, `runtimes`, or `config`, RhinoBOX treats that folder as its portable home.
+
+Recommended portable layout:
+
+```text
+RhinoBOX/
+  RhinoBOX.exe
+  portable.txt
+  www/
+  runtimes/
+    nginx/
+    php/
+    mailpit/
+    pgweb/
+    redis/
+  config/
+    nginx/
+      vhosts/
+  data/
+```
+
+Portable path behavior:
+
+- app state is stored in the portable folder, such as `service-selection.json`
+- virtual domain records are stored in the portable folder
+- vhost config files are written to `config/nginx/vhosts`
+- projects are read from `www` when that folder exists beside the executable
+- runtimes are read from `runtimes` when that folder exists beside the executable
+
+You can override detection with environment variables:
+
+- `RHINOBOX_HOME`
+- `RHINOBOX_WEB_ROOT`
+- `RHINOBOX_RUNTIMES`
+- `RHINOBOX_PORTABLE=1`
+
+Create a portable ZIP:
+
+```powershell
+npm run build:portable
+```
+
+To include local runtimes from `C:\www\runtimes`:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File scripts/build-portable.ps1 -IncludeRuntimes
+```
 
 ## Stack
 
@@ -61,7 +111,7 @@ assets/branding/     RhinoBOX logo assets
 
 ### Projects
 
-- scans local project folders in `C:\www`
+- scans local project folders in the active web root
 - detects common project types such as Laravel, WordPress, PHP, Node.js, Go, and Python
 - links projects to configured virtual domains when available
 - quick actions for browser, VS Code, terminal, and folder
