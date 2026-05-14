@@ -57,6 +57,8 @@ Portable path behavior:
 - vhost config files are written to `config/nginx/vhosts`
 - projects are read from `www` when that folder exists beside the executable
 - runtimes are read from `runtimes` when that folder exists beside the executable
+- MariaDB and PostgreSQL can run from bundled portable runtimes
+- database data is initialized on first start under `data\mariadb` and `data\postgresql`
 
 You can override detection with environment variables:
 
@@ -65,13 +67,18 @@ You can override detection with environment variables:
 - `RHINOBOX_RUNTIMES`
 - `RHINOBOX_PORTABLE=1`
 
-Create a portable ZIP:
+Create a full portable ZIP:
 
 ```powershell
 npm run build:portable
 ```
 
-To include local runtimes from `C:\www\runtimes`:
+The full portable build includes app runtimes from `C:\www\runtimes`, phpMyAdmin from `C:\www\phpmyadmin`, and database runtimes from local installs when available:
+
+- `C:\Program Files\MariaDB 12.2`
+- `C:\Program Files\PostgreSQL\17`
+
+For a smaller package, call the script manually and choose what to include:
 
 ```powershell
 powershell -ExecutionPolicy Bypass -File scripts/build-portable.ps1 -IncludeRuntimes

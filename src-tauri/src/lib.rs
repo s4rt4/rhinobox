@@ -318,6 +318,72 @@ fn redis_exe_path() -> PathBuf {
         .join("redis-server.exe")
 }
 
+fn find_runtime_root(kind: &str, exe_relative: &str) -> Option<(String, PathBuf)> {
+    let roots = [runtimes_root_path().join(kind), PathBuf::from(format!("C:\\www\\runtimes\\{kind}"))];
+    for root in roots {
+        let mut versions = runtime_version_dirs(root.clone());
+        versions.sort_by(|left, right| right.cmp(left));
+        for version in versions {
+            let candidate = root.join(&version);
+            if candidate.join(exe_relative).exists() {
+                return Some((version, candidate));
+            }
+        }
+    }
+    None
+}
+
+fn mariadb_portable_root() -> Option<(String, PathBuf)> {
+    find_runtime_root("mariadb", "bin\\mariadbd.exe")
+        .or_else(|| find_runtime_root("mariadb", "bin\\mysqld.exe"))
+}
+
+fn mariadb_root_path() -> Option<(String, PathBuf)> {
+    mariadb_portable_root().or_else(|| {
+        let root = PathBuf::from("C:\\Program Files\\MariaDB 12.2");
+        if root.join("bin").join("mariadbd.exe").exists() || root.join("bin").join("mysqld.exe").exists() {
+            Some(("12.2.2".into(), root))
+        } else {
+            None
+        }
+    })
+}
+
+fn postgresql_portable_root() -> Option<(String, PathBuf)> {
+    find_runtime_root("postgresql", "bin\\postgres.exe")
+}
+
+fn postgresql_root_path() -> Option<(String, PathBuf)> {
+    postgresql_portable_root().or_else(|| {
+        let root = PathBuf::from("C:\\Program Files\\PostgreSQL\\17");
+        if root.join("bin").join("postgres.exe").exists() {
+            Some(("17".into(), root))
+        } else {
+            None
+        }
+    })
+}
+
+fn mariadb_data_path() -> PathBuf {
+    app_home_path().join("data").join("mariadb")
+}
+
+fn mariadb_config_path() -> PathBuf {
+    app_home_path().join("config").join("mariadb").join("my.ini")
+}
+
+fn postgresql_data_path() -> PathBuf {
+    app_home_path().join("data").join("postgresql")
+}
+
+fn postgresql_config_path() -> PathBuf {
+    postgresql_data_path().join("postgresql.conf")
+}
+
+fn postgresql_hba_path() -> PathBuf {
+    postgresql_data_path().join("pg_hba.conf")
+}
+
 fn show_main_window<R: tauri::Runtime, M: Manager<R>>(manager: &M) {
     if let Some(window) = manager.get_webview_window("main") {
         let _ = window.unminimize();
@@ -442,7 +508,9 @@ fn runtime_discovery_snapshot() -> RuntimeDiscoverySnapshot {
         timestamp: Instant::now(),
         nginx_versions: installed_nginx_versions(),
         php_versions: installed_php_versions(),
-        mariadb_versions: vec!["12.2.2".into()],
+        mariadb_versions: mariadb_root_path()
+            .map(|(version, _)| vec![version])
+            .unwrap_or_default(),
         postgresql_versions: postgresql_bin_path()
             .and_then(|path| command_version(&path, &["--version"]))
             .map(|version| version.replace("psql (PostgreSQL)", "").trim().to_string())
@@ -713,6 +781,21 @@ fn config_files() -> Vec<ConfigFileSummary> {
         .map(|root| format!("{root}\\php.ini"))
         .unwrap_or_else(|| path_string(runtimes_root_path().join("php").join(&php_current).join("php.ini")));
     let phpmyadmin_config = path_string(web_root_path().join("phpmyadmin").join("config.inc.php"));
+    let mariadb_conf = if mariadb_portable_root().is_some() {
+        path_string(mariadb_config_path())
+    } else {
+        "C:\\Program Files\\MariaDB 12.2\\data\\my.ini".into()
+    };
+    let postgresql_conf = if postgresql_portable_root().is_some() {
+        path_string(postgresql_config_path())
+    } else {
+        "C:\\Program Files\\PostgreSQL\\17\\data\\postgresql.conf".into()
+    };
+    let postgresql_hba = if postgresql_portable_root().is_some() {
+        path_string(postgresql_hba_path())
+    } else {
+        "C:\\Program Files\\PostgreSQL\\17\\data\\pg_hba.conf".into()
+    };
 
     vec![
         ConfigFileSummary {
@@ -732,9 +815,9 @@ fn config_files() -> Vec<ConfigFileSummary> {
         ConfigFileSummary {
             key: "mariadb".into(),
             label: "my.ini".into(),
-            path: "C:\\Program Files\\MariaDB 12.2\\data\\my.ini".into(),
+            path: mariadb_conf.clone(),
             service_key: Some("mariadb".into()),
-            exists: Some(Path::new("C:\\Program Files\\MariaDB 12.2\\data\\my.ini").exists()),
+            exists: Some(Path::new(&mariadb_conf).exists()),
         },
         ConfigFileSummary {
             key: "phpmyadmin".into(),
@@ -746,16 +829,16 @@ fn config_files() -> Vec<ConfigFileSummary> {
         ConfigFileSummary {
             key: "postgresql".into(),
             label: "postgresql.conf".into(),
-            path: "C:\\Program Files\\PostgreSQL\\17\\data\\postgresql.conf".into(),
+            path: postgresql_conf.clone(),
             service_key: Some("postgresql".into()),
-            exists: Some(Path::new("C:\\Program Files\\PostgreSQL\\17\\data\\postgresql.conf").exists()),
+            exists: Some(Path::new(&postgresql_conf).exists()),
         },
         ConfigFileSummary {
             key: "postgresql_hba".into(),
             label: "pg_hba.conf".into(),
-            path: "C:\\Program Files\\PostgreSQL\\17\\data\\pg_hba.conf".into(),
+            path: postgresql_hba.clone(),
             service_key: Some("postgresql".into()),
-            exists: Some(Path::new("C:\\Program Files\\PostgreSQL\\17\\data\\pg_hba.conf").exists()),
+            exists: Some(Path::new(&postgresql_hba).exists()),
         },
     ]
 }
@@ -1334,12 +1417,10 @@ fn postgresql_service_name() -> String {
 }
 
 fn postgresql_bin_path() -> Option<String> {
-    let path = "C:\\Program Files\\PostgreSQL\\17\\bin\\psql.exe".to_string();
-    if Path::new(&path).exists() {
-        Some(path)
-    } else {
-        command_exists_path("psql")
-    }
+    postgresql_root_path()
+        .map(|(_, root)| path_string(root.join("bin").join("psql.exe")))
+        .filter(|path| Path::new(path).exists())
+        .or_else(|| command_exists_path("psql"))
 }
 
 fn installed_nginx_versions() -> Vec<String> {
@@ -1368,7 +1449,9 @@ fn service_versions(key: &str) -> Vec<String> {
     match key {
         "nginx" => installed_nginx_versions(),
         "php_cgi" => installed_php_versions(),
-        "mariadb" => vec!["12.2.2".into()],
+        "mariadb" => mariadb_root_path()
+            .map(|(version, _)| vec![version])
+            .unwrap_or_default(),
         "postgresql" => postgresql_bin_path()
             .and_then(|path| command_version(&path, &["--version"]))
             .map(|version| {
@@ -1389,6 +1472,181 @@ fn service_versions(key: &str) -> Vec<String> {
         "memcached" => vec![MEMCACHED_VERSION.into()],
         _ => Vec::new(),
     }
+}
+
+fn ensure_mariadb_portable_files(root: &Path) -> Result<(), String> {
+    let data_dir = mariadb_data_path();
+    let log_dir = app_home_path().join("data").join("logs");
+    fs::create_dir_all(&data_dir).map_err(|e| e.to_string())?;
+    fs::create_dir_all(&log_dir).map_err(|e| e.to_string())?;
+    fs::create_dir_all(
+        mariadb_config_path()
+            .parent()
+            .ok_or_else(|| "Invalid MariaDB config path".to_string())?,
+    )
+    .map_err(|e| e.to_string())?;
+
+    if !data_dir.join("mysql").exists() {
+        let installer = root.join("bin").join("mariadb-install-db.exe");
+        let installer = if installer.exists() {
+            installer
+        } else {
+            root.join("bin").join("mysql_install_db.exe")
+        };
+        if !installer.exists() {
+            return Err("MariaDB install-db tool not found".into());
+        }
+
+        let output = new_background_command(&path_string(installer))
+            .args(["--datadir", &path_string(data_dir.clone()), "--port", "3306", "--silent"])
+            .output()
+            .map_err(|e| e.to_string())?;
+        if !output.status.success() {
+            let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
+            return Err(if stderr.is_empty() {
+                "MariaDB data initialization failed".into()
+            } else {
+                stderr
+            });
+        }
+    }
+
+    let log_path = log_dir.join("mariadb.err");
+    let config = format!(
+        "[mysqld]\r\nbasedir={}\r\ndatadir={}\r\nport=3306\r\nbind-address=127.0.0.1\r\ncharacter-set-server=utf8mb4\r\nskip-name-resolve\r\nlog_error={}\r\n\r\n[client]\r\nport=3306\r\nhost=127.0.0.1\r\nuser=root\r\n",
+        path_string(root.to_path_buf()).replace('\\', "/"),
+        path_string(data_dir).replace('\\', "/"),
+        path_string(log_path).replace('\\', "/")
+    );
+    fs::write(mariadb_config_path(), config).map_err(|e| e.to_string())
+}
+
+fn mariadb_server_exe(root: &Path) -> Option<PathBuf> {
+    let mariadbd = root.join("bin").join("mariadbd.exe");
+    if mariadbd.exists() {
+        return Some(mariadbd);
+    }
+    let mysqld = root.join("bin").join("mysqld.exe");
+    if mysqld.exists() {
+        return Some(mysqld);
+    }
+    None
+}
+
+fn start_mariadb_portable(root: PathBuf) -> Result<String, String> {
+    ensure_mariadb_portable_files(&root)?;
+    let exe = mariadb_server_exe(&root).ok_or_else(|| "MariaDB server binary not found".to_string())?;
+    let args = format!("--defaults-file=\"{}\"", path_string(mariadb_config_path()));
+    new_background_command("powershell")
+        .args([
+            "-NoProfile",
+            "-ExecutionPolicy",
+            "Bypass",
+            "-Command",
+            &format!(
+                "Start-Process -FilePath '{}' -ArgumentList '{}' -WorkingDirectory '{}' -WindowStyle Hidden; 'MariaDB portable started'",
+                path_string(exe).replace('\'', "''"),
+                args.replace('\'', "''"),
+                path_string(root).replace('\'', "''")
+            ),
+        ])
+        .output()
+        .map_err(|e| e.to_string())?;
+    Ok("MariaDB portable started".into())
+}
+
+fn stop_mariadb_portable() -> Result<String, String> {
+    powershell("Get-Process mariadbd,mysqld -ErrorAction SilentlyContinue | Stop-Process -Force; 'MariaDB portable stopped'")
+}
+
+fn ensure_postgresql_portable_files(root: &Path) -> Result<(), String> {
+    let data_dir = postgresql_data_path();
+    fs::create_dir_all(&data_dir).map_err(|e| e.to_string())?;
+    let initdb = root.join("bin").join("initdb.exe");
+    if !data_dir.join("PG_VERSION").exists() {
+        if !initdb.exists() {
+            return Err("PostgreSQL initdb not found".into());
+        }
+        let output = new_background_command(&path_string(initdb))
+            .args([
+                "-D",
+                &path_string(data_dir.clone()),
+                "-U",
+                "postgres",
+                "-A",
+                "trust",
+                "--encoding=UTF8",
+                "--no-locale",
+            ])
+            .output()
+            .map_err(|e| e.to_string())?;
+        if !output.status.success() {
+            let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
+            return Err(if stderr.is_empty() {
+                "PostgreSQL data initialization failed".into()
+            } else {
+                stderr
+            });
+        }
+    }
+
+    let conf_path = postgresql_config_path();
+    if conf_path.exists() {
+        let content = fs::read_to_string(&conf_path).map_err(|e| e.to_string())?;
+        let mut lines: Vec<String> = content
+            .lines()
+            .filter(|line| {
+                let trimmed = line.trim_start();
+                !trimmed.starts_with("port =") && !trimmed.starts_with("listen_addresses =")
+            })
+            .map(|line| line.to_string())
+            .collect();
+        lines.push("listen_addresses = '127.0.0.1'".into());
+        lines.push("port = 5432".into());
+        fs::write(&conf_path, lines.join("\r\n")).map_err(|e| e.to_string())?;
+    }
+
+    let hba_path = postgresql_hba_path();
+    if hba_path.exists() {
+        let content = fs::read_to_string(&hba_path).unwrap_or_default();
+        if !content.contains("# RhinoBOX portable trust") {
+            let extra = "\r\n# RhinoBOX portable trust\r\nhost all all 127.0.0.1/32 trust\r\nhost all all ::1/128 trust\r\n";
+            fs::write(&hba_path, format!("{content}{extra}")).map_err(|e| e.to_string())?;
+        }
+    }
+
+    Ok(())
+}
+
+fn start_postgresql_portable(root: PathBuf) -> Result<String, String> {
+    ensure_postgresql_portable_files(&root)?;
+    let pg_ctl = root.join("bin").join("pg_ctl.exe");
+    if !pg_ctl.exists() {
+        return Err("PostgreSQL pg_ctl not found".into());
+    }
+    let log_dir = app_home_path().join("data").join("logs");
+    fs::create_dir_all(&log_dir).map_err(|e| e.to_string())?;
+    let log_path = log_dir.join("postgresql.log");
+    let pg_ctl_path = path_string(pg_ctl);
+    let data_path = path_string(postgresql_data_path());
+    let log_path = path_string(log_path);
+    command_output(
+        &pg_ctl_path,
+        &["-D", &data_path, "-l", &log_path, "-w", "start"],
+    )?;
+    Ok("PostgreSQL portable started".into())
+}
+
+fn stop_postgresql_portable() -> Result<String, String> {
+    if let Some((_, root)) = postgresql_portable_root() {
+        let pg_ctl = root.join("bin").join("pg_ctl.exe");
+        if pg_ctl.exists() && postgresql_data_path().join("PG_VERSION").exists() {
+            let pg_ctl_path = path_string(pg_ctl);
+            let data_path = path_string(postgresql_data_path());
+            let _ = command_output(&pg_ctl_path, &["-D", &data_path, "-m", "fast", "stop"]);
+        }
+    }
+    powershell("Get-Process postgres -ErrorAction SilentlyContinue | Stop-Process -Force; 'PostgreSQL portable stopped'")
 }
 
 fn tail_lines(path: &str, max_lines: usize) -> Vec<String> {
@@ -1476,6 +1734,8 @@ fn get_services_inner() -> Vec<ManagedService> {
     let go_path = discovery.go_path.clone();
     let postgresql_service = postgresql_service_name();
     let postgresql_path = discovery.postgresql_path.clone();
+    let mariadb_is_portable = mariadb_portable_root().is_some();
+    let postgresql_is_portable = postgresql_portable_root().is_some();
     let git_path = discovery.git_path.clone();
     let mailpit_path = discovery.mailpit_path.clone();
     let pgweb_path = discovery.pgweb_path.clone();
@@ -1486,7 +1746,11 @@ fn get_services_inner() -> Vec<ManagedService> {
     let processes = process_id_map();
     let nginx_pid = processes.get("nginx.exe").copied();
     let php_cgi_pid = processes.get("php-cgi.exe").copied();
-    let mariadb_pid = processes.get("mariadb.exe").copied();
+    let mariadb_pid = processes
+        .get("mariadbd.exe")
+        .copied()
+        .or_else(|| processes.get("mysqld.exe").copied())
+        .or_else(|| processes.get("mariadb.exe").copied());
     let postgres_pid = processes.get("postgres.exe").copied();
     let node_pid = processes.get("node.exe").copied();
     let python_pid = processes.get("python.exe").copied();
@@ -1527,25 +1791,33 @@ fn get_services_inner() -> Vec<ManagedService> {
         ManagedService {
             key: "mariadb".into(),
             label: "MariaDB".into(),
-            status: windows_service_status("MariaDB"),
-            detail: "Primary local database service".into(),
+            status: if mariadb_is_portable {
+                if mariadb_pid.is_some() { ServiceStatus::Running } else { ServiceStatus::Stopped }
+            } else {
+                windows_service_status("MariaDB")
+            },
+            detail: if mariadb_is_portable { "Portable local database process".into() } else { "Primary local database service".into() },
             port: if ports.contains(&3306) { Some(3306) } else { None },
             pid: mariadb_pid,
             can_reload: false,
-            kind: "windows-service".into(),
+            kind: if mariadb_is_portable { "process".into() } else { "windows-service".into() },
             current_version: mariadb_current,
             versions: mariadb_versions,
-            launch_target: None,
+            launch_target: mariadb_root_path().map(|(_, root)| path_string(root)),
         },
         ManagedService {
             key: "postgresql".into(),
             label: "PostgreSQL".into(),
-            status: windows_service_status(&postgresql_service),
-            detail: "Primary PostgreSQL database service".into(),
+            status: if postgresql_is_portable {
+                if postgres_pid.is_some() { ServiceStatus::Running } else { ServiceStatus::Stopped }
+            } else {
+                windows_service_status(&postgresql_service)
+            },
+            detail: if postgresql_is_portable { "Portable PostgreSQL database process".into() } else { "Primary PostgreSQL database service".into() },
             port: if ports.contains(&5432) { Some(5432) } else { None },
             pid: postgres_pid,
             can_reload: false,
-            kind: "windows-service".into(),
+            kind: if postgresql_is_portable { "process".into() } else { "windows-service".into() },
             current_version: postgresql_current,
             versions: postgresql_versions,
             launch_target: postgresql_path,
@@ -1723,6 +1995,31 @@ fn get_discovery() -> Vec<DiscoveryItem> {
     let app_home = path_string(app_home_path());
     let web_root = path_string(web_root_path());
     let vhosts_dir = path_string(vhosts_dir_path());
+    let mariadb_conf = if mariadb_portable_root().is_some() {
+        path_string(mariadb_config_path())
+    } else {
+        "C:\\Program Files\\MariaDB 12.2\\data\\my.ini".into()
+    };
+    let mariadb_data = if mariadb_portable_root().is_some() {
+        path_string(mariadb_data_path())
+    } else {
+        "C:\\Program Files\\MariaDB 12.2\\data".into()
+    };
+    let postgresql_conf = if postgresql_portable_root().is_some() {
+        path_string(postgresql_config_path())
+    } else {
+        "C:\\Program Files\\PostgreSQL\\17\\data\\postgresql.conf".into()
+    };
+    let postgresql_hba = if postgresql_portable_root().is_some() {
+        path_string(postgresql_hba_path())
+    } else {
+        "C:\\Program Files\\PostgreSQL\\17\\data\\pg_hba.conf".into()
+    };
+    let postgresql_data = if postgresql_portable_root().is_some() {
+        path_string(postgresql_data_path())
+    } else {
+        "C:\\Program Files\\PostgreSQL\\17\\data".into()
+    };
 
     vec![
         DiscoveryItem {
@@ -1756,37 +2053,37 @@ fn get_discovery() -> Vec<DiscoveryItem> {
         DiscoveryItem {
             key: "mariadb_conf".into(),
             label: "MariaDB config".into(),
-            value: "C:\\Program Files\\MariaDB 12.2\\data\\my.ini".into(),
+            value: mariadb_conf.clone(),
             source: "detected".into(),
-            available: Some(Path::new("C:\\Program Files\\MariaDB 12.2\\data\\my.ini").exists()),
+            available: Some(Path::new(&mariadb_conf).exists()),
         },
         DiscoveryItem {
             key: "mariadb_data".into(),
             label: "MariaDB data dir".into(),
-            value: "C:\\Program Files\\MariaDB 12.2\\data".into(),
+            value: mariadb_data.clone(),
             source: "detected".into(),
-            available: Some(Path::new("C:\\Program Files\\MariaDB 12.2\\data").exists()),
+            available: Some(Path::new(&mariadb_data).exists()),
         },
         DiscoveryItem {
             key: "postgresql_conf".into(),
             label: "PostgreSQL config".into(),
-            value: "C:\\Program Files\\PostgreSQL\\17\\data\\postgresql.conf".into(),
+            value: postgresql_conf.clone(),
             source: "detected".into(),
-            available: Some(Path::new("C:\\Program Files\\PostgreSQL\\17\\data\\postgresql.conf").exists()),
+            available: Some(Path::new(&postgresql_conf).exists()),
         },
         DiscoveryItem {
             key: "postgresql_hba".into(),
             label: "PostgreSQL access rules".into(),
-            value: "C:\\Program Files\\PostgreSQL\\17\\data\\pg_hba.conf".into(),
+            value: postgresql_hba.clone(),
             source: "detected".into(),
-            available: Some(Path::new("C:\\Program Files\\PostgreSQL\\17\\data\\pg_hba.conf").exists()),
+            available: Some(Path::new(&postgresql_hba).exists()),
         },
         DiscoveryItem {
             key: "postgresql_data".into(),
             label: "PostgreSQL data dir".into(),
-            value: "C:\\Program Files\\PostgreSQL\\17\\data".into(),
+            value: postgresql_data.clone(),
             source: "detected".into(),
-            available: Some(Path::new("C:\\Program Files\\PostgreSQL\\17\\data").exists()),
+            available: Some(Path::new(&postgresql_data).exists()),
         },
         DiscoveryItem {
             key: "nodejs_path".into(),
@@ -1925,12 +2222,21 @@ fn get_logs() -> Vec<LogTarget> {
     let nginx_log = nginx_version_path(&nginx_current)
         .map(|root| format!("{root}\\logs\\error.log"))
         .unwrap_or_else(|| path_string(runtimes_root_path().join("nginx").join(&nginx_current).join("logs").join("error.log")));
-    let postgres_log = latest_matching_file(
-        "C:\\Program Files\\PostgreSQL\\17\\data\\log",
-        "postgresql-",
-        ".log",
-    )
-    .unwrap_or_else(|| "C:\\Program Files\\PostgreSQL\\17\\data\\log".into());
+    let mariadb_log = if mariadb_portable_root().is_some() {
+        path_string(app_home_path().join("data").join("logs").join("mariadb.err"))
+    } else {
+        "C:\\Program Files\\MariaDB 12.2\\data\\DESKTOP-SAN5L98.err".to_string()
+    };
+    let postgres_log = if postgresql_portable_root().is_some() {
+        path_string(app_home_path().join("data").join("logs").join("postgresql.log"))
+    } else {
+        latest_matching_file(
+            "C:\\Program Files\\PostgreSQL\\17\\data\\log",
+            "postgresql-",
+            ".log",
+        )
+        .unwrap_or_else(|| "C:\\Program Files\\PostgreSQL\\17\\data\\log".into())
+    };
 
     let targets = vec![
         (
@@ -1941,7 +2247,7 @@ fn get_logs() -> Vec<LogTarget> {
         (
             "mariadb_error".to_string(),
             "MariaDB error log".to_string(),
-            "C:\\Program Files\\MariaDB 12.2\\data\\DESKTOP-SAN5L98.err".to_string(),
+            mariadb_log,
         ),
         (
             "postgresql_log".to_string(),
@@ -2170,12 +2476,50 @@ fn control_service_inner(key: String, action: String, version: Option<String>) -
             );
             powershell(&script)
         }
-        ("mariadb", "start") => powershell("Start-Service -Name 'MariaDB'; 'MariaDB started'"),
-        ("mariadb", "stop") => powershell("Stop-Service -Name 'MariaDB' -Force; 'MariaDB stopped'"),
-        ("mariadb", "restart") => powershell("Restart-Service -Name 'MariaDB' -Force; 'MariaDB restarted'"),
-        ("postgresql", "start") => powershell("Start-Service -Name 'postgresql-x64-17'; 'PostgreSQL started'"),
-        ("postgresql", "stop") => powershell("Stop-Service -Name 'postgresql-x64-17' -Force; 'PostgreSQL stopped'"),
-        ("postgresql", "restart") => powershell("Restart-Service -Name 'postgresql-x64-17' -Force; 'PostgreSQL restarted'"),
+        ("mariadb", "start") => {
+            if let Some((_, root)) = mariadb_portable_root() {
+                start_mariadb_portable(root)
+            } else {
+                powershell("Start-Service -Name 'MariaDB'; 'MariaDB started'")
+            }
+        }
+        ("mariadb", "stop") => {
+            if mariadb_portable_root().is_some() {
+                stop_mariadb_portable()
+            } else {
+                powershell("Stop-Service -Name 'MariaDB' -Force; 'MariaDB stopped'")
+            }
+        }
+        ("mariadb", "restart") => {
+            if let Some((_, root)) = mariadb_portable_root() {
+                stop_mariadb_portable()?;
+                start_mariadb_portable(root)
+            } else {
+                powershell("Restart-Service -Name 'MariaDB' -Force; 'MariaDB restarted'")
+            }
+        }
+        ("postgresql", "start") => {
+            if let Some((_, root)) = postgresql_portable_root() {
+                start_postgresql_portable(root)
+            } else {
+                powershell("Start-Service -Name 'postgresql-x64-17'; 'PostgreSQL started'")
+            }
+        }
+        ("postgresql", "stop") => {
+            if postgresql_portable_root().is_some() {
+                stop_postgresql_portable()
+            } else {
+                powershell("Stop-Service -Name 'postgresql-x64-17' -Force; 'PostgreSQL stopped'")
+            }
+        }
+        ("postgresql", "restart") => {
+            if let Some((_, root)) = postgresql_portable_root() {
+                stop_postgresql_portable()?;
+                start_postgresql_portable(root)
+            } else {
+                powershell("Restart-Service -Name 'postgresql-x64-17' -Force; 'PostgreSQL restarted'")
+            }
+        }
         ("mailpit", "start") => {
             let exe = if mailpit_exe_path().exists() {
                 path_string(mailpit_exe_path())

@@ -6,7 +6,7 @@
   "scripts": {
     "dev": "vite",
     "build": "tsc && vite build",
-    "build:portable": "powershell -ExecutionPolicy Bypass -File scripts/build-portable.ps1",
+    "build:portable": "powershell -ExecutionPolicy Bypass -File scripts/build-portable.ps1 -IncludeRuntimes -IncludeDatabases -IncludePhpMyAdmin",
     "preview": "vite preview",
     "tauri": "tauri"
   },

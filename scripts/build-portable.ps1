@@ -2,6 +2,7 @@ param(
     [string] $Configuration = "release",
     [switch] $SkipBuild,
     [switch] $IncludeRuntimes,
+    [switch] $IncludeDatabases,
     [switch] $IncludePhpMyAdmin
 )
 
@@ -61,6 +62,32 @@ if ($IncludeRuntimes) {
         if ($LASTEXITCODE -gt 7) {
             throw "Failed to copy runtimes from $sourceRuntimes"
         }
+    }
+}
+
+if ($IncludeDatabases) {
+    $mariaSource = "C:\Program Files\MariaDB 12.2"
+    $mariaDest = Join-Path $portableRoot "runtimes\mariadb\12.2.2"
+    if (Test-Path -LiteralPath (Join-Path $mariaSource "bin\mariadbd.exe")) {
+        New-Item -ItemType Directory -Force -Path $mariaDest | Out-Null
+        robocopy $mariaSource $mariaDest /E /XD data /XF *.pdb *.log | Out-Host
+        if ($LASTEXITCODE -gt 7) {
+            throw "Failed to copy MariaDB from $mariaSource"
+        }
+    } else {
+        Write-Warning "MariaDB source not found: $mariaSource"
+    }
+
+    $postgresSource = "C:\Program Files\PostgreSQL\17"
+    $postgresDest = Join-Path $portableRoot "runtimes\postgresql\17"
+    if (Test-Path -LiteralPath (Join-Path $postgresSource "bin\postgres.exe")) {
+        New-Item -ItemType Directory -Force -Path $postgresDest | Out-Null
+        robocopy $postgresSource $postgresDest /E /XD data "pgAdmin 4" doc installer /XF uninstall* *.pdb *.log | Out-Host
+        if ($LASTEXITCODE -gt 7) {
+            throw "Failed to copy PostgreSQL from $postgresSource"
+        }
+    } else {
+        Write-Warning "PostgreSQL source not found: $postgresSource"
     }
 }
 
